@@ -256,7 +256,16 @@ BEGIN
         (v_day_1_id, v_alloc_adult_1_d1, v_ep_adult_1, v_bus_1_id, 'OUTBOUND', v_user_captain_1)
     ON CONFLICT DO NOTHING;
 
-    -- 15. AUDITORIA INICIAL
+    -- 15. CONVITES DE TESTE (FASE 1)
+    INSERT INTO public.invitations (
+        email, congregation_id, event_id, role, assigned_vehicle_id, status, expires_at, invited_by
+    ) VALUES 
+        ('convidado.capitao@exemplo.com', v_congregation_id, v_event_id, 'BUS_CAPTAIN', v_bus_1_id, 'PENDING', now() + interval '7 days', v_user_coord),
+        ('convidado.expirado@exemplo.com', v_congregation_id, v_event_id, 'CAPTAIN_HELPER', v_bus_1_id, 'EXPIRED', now() - interval '1 day', v_user_coord),
+        ('convidado.revogado@exemplo.com', v_congregation_id, v_event_id, 'BUS_CAPTAIN', v_bus_2_id, 'REVOKED', now() + interval '5 days', v_user_coord)
+    ON CONFLICT DO NOTHING;
+
+    -- 16. AUDITORIA INICIAL
     INSERT INTO public.audit_logs (event_id, actor_user_id, actor_role, action, entity_type, entity_id, after_data, metadata) VALUES
         (v_event_id, v_user_coord, 'COORDINATOR', 'SEED_INITIALIZED', 'events', v_event_id, jsonb_build_object('theme', 'Declare as Boas Novas! 2026'), jsonb_build_object('system', 'seed.sql'));
 

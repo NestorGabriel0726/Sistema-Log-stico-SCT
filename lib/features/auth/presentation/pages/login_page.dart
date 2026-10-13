@@ -1,39 +1,33 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_typography.dart';
-import '../../../../core/network/supabase_service.dart';
+import '../providers/auth_provider.dart';
+import '../providers/auth_state.dart';
 
 /// Tela inicial de Login via Google OAuth (Seções 12 e 13).
-class LoginPage extends StatefulWidget {
+class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
   @override
-  State<LoginPage> createState() => _LoginPageState();
+  ConsumerState<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends State<LoginPage> {
-  bool _isLoading = false;
-  String? _errorMessage;
+class _LoginPageState extends ConsumerState<LoginPage> {
+  bool _isSigningIn = false;
 
   Future<void> _handleGoogleSignIn() async {
     setState(() {
-      _isLoading = true;
-      _errorMessage = null;
+      _isSigningIn = true;
     });
 
     try {
-      // Inicia fluxo OAuth via Supabase (PKCE)
-      await SupabaseService.client.auth.signInWithOAuth(
-        OAuthProvider.google,
-        redirectTo: 'transportlogistics://login-callback',
-      );
-    } catch (e) {
+      await ref.read(authNotifierProvider.notifier).signInWithGoogle();
+    } finally {
       if (mounted) {
         setState(() {
-          _errorMessage = 'Não foi possível completar o login com o Google. Tente novamente.';
-          _isLoading = false;
+          _isSigningIn = false;
         });
       }
     }
@@ -41,6 +35,16 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final authState = ref.watch(authNotifierProvider);
+
+    final bool isLoading = _isSigningIn || authState is AuthStateLoadingProfile;
+    String? errorMessage;
+    if (authState is AuthStateRecoverableError) {
+      errorMessage = authState.message;
+    } else if (authState is AuthStateSessionExpired) {
+      errorMessage = 'Sua sessão expirou. Faça login novamente com a Conta Google.';
+    }
+
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
@@ -73,7 +77,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: AppSpacing.xl),
 
-                    if (_errorMessage != null) ...[
+                    if (errorMessage != null) ...[
                       Container(
                         padding: const EdgeInsets.all(AppSpacing.sm),
                         decoration: BoxDecoration(
@@ -82,23 +86,24 @@ class _LoginPageState extends State<LoginPage> {
                           border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
                         ),
                         child: Text(
-                          _errorMessage!,
+                          errorMessage,
                           style: const TextStyle(color: AppColors.error, fontSize: 13),
+                          textAlign: TextAlign.center,
                         ),
                       ),
                       const SizedBox(height: AppSpacing.md),
                     ],
 
                     ElevatedButton.icon(
-                      onPressed: _isLoading ? null : _handleGoogleSignIn,
-                      icon: _isLoading
+                      onPressed: isLoading ? null : _handleGoogleSignIn,
+                      icon: isLoading
                           ? const SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                             )
                           : const Icon(Icons.account_circle_outlined),
-                      label: Text(_isLoading ? 'Conectando...' : 'Entrar com Conta Google'),
+                      label: Text(isLoading ? 'Conectando...' : 'Entrar com Conta Google'),
                     ),
 
                     const SizedBox(height: AppSpacing.md),

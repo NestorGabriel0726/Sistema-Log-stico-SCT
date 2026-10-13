@@ -59,6 +59,36 @@ class DomainFailure extends Failure {
           'O passageiro já se encontra neste mesmo veículo.',
           code: 'CANNOT_RELOCATE_TO_SAME_VEHICLE',
         );
+      case 'INVITATION_NOT_FOUND':
+        return const DomainFailure(
+          'Convite não encontrado ou inválido.',
+          code: 'INVITATION_NOT_FOUND',
+        );
+      case 'INVITATION_EXPIRED':
+        return const DomainFailure(
+          'Este convite expirou. Solicite um novo convite ao Coordenador.',
+          code: 'INVITATION_EXPIRED',
+        );
+      case 'INVITATION_NOT_PENDING':
+        return const DomainFailure(
+          'Este convite já foi utilizado ou foi revogado.',
+          code: 'INVITATION_NOT_PENDING',
+        );
+      case 'EMAIL_MISMATCH':
+        return const DomainFailure(
+          'Este convite foi enviado para outro endereço de e-mail. Entre com a conta correta.',
+          code: 'EMAIL_MISMATCH',
+        );
+      case 'CONGREGATION_NOT_FOUND':
+        return const DomainFailure(
+          'Congregação não encontrada.',
+          code: 'CONGREGATION_NOT_FOUND',
+        );
+      case 'INVALID_EMAIL':
+        return const DomainFailure(
+          'O endereço de e-mail informado é inválido.',
+          code: 'INVALID_EMAIL',
+        );
       default:
         return DomainFailure(
           'Ocorreu uma falha na operação ($code). Tente novamente.',
@@ -74,6 +104,15 @@ class NetworkFailure extends Failure {
 }
 
 class AuthFailure extends Failure {
-  const AuthFailure([super.message = 'Falha na autenticação. Faça login novamente.'])
-      : super(code: 'AUTH_ERROR');
+  const AuthFailure(super.message, [String? code])
+      : super(code: code ?? 'AUTH_ERROR');
+
+  const AuthFailure.generic()
+      : this('Falha na autenticação. Faça login novamente.');
+}
+
+class AuthCancelledFailure extends Failure {
+  const AuthCancelledFailure([
+    super.message = 'O login com o Google foi cancelado.',
+  ]) : super(code: 'AUTH_CANCELLED');
 }

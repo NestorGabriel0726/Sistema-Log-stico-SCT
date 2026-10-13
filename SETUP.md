@@ -36,7 +36,8 @@ O banco de dados PostgreSQL é gerenciado 100% como código através das migraç
 Certifique-se de que o **Docker Desktop** esteja em execução e execute:
 
 ```powershell
-npx supabase start
+# No Windows PowerShell, use npx.cmd para evitar restrições de ExecutionPolicy:
+npx.cmd supabase start
 ```
 
 Ao concluir a inicialização, o terminal exibirá:

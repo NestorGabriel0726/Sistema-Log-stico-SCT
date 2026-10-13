@@ -46,3 +46,21 @@ Este documento registra formalmente as decisões arquiteturais (ADRs - *Architec
 - **Contexto**: A dinâmica de transporte de congregação exige flexibilidade operacional para trocas de última hora, não um sistema rígido de reserva de poltronas estilo companhia aérea.
 - **Decisão**: O controle é realizado por listas verticais numeradas e capacidade total. O número representa apenas a posição na lista.
 - **Consequências**: Alta velocidade de remanejamento, interface limpa para celular e adequação à realidade dos eventos.
+
+---
+
+## ADR-006: Autenticação Google e Vínculo via Convites Atômicos com RLS
+
+- **Status**: Aceito.
+- **Contexto**: O sistema não permite auto-cadastro livre com privilégios auto-atribuídos. Qualquer pessoa pode logar com a Conta Google, mas só pode visualizar ou operar dados de uma congregação/evento se possuir um convite explicitamente enviado pelo Coordenador para o seu endereço de e-mail e aceito atomicamente no banco.
+- **Decisão**: O aceite de convites é realizado via RPC `accept_invitation()` no PostgreSQL com validação de e-mail (`lower(trim(auth.jwt()->>'email')) == lower(trim(invitation.email))`), atribuição de permissões atômicas padrão por papel e expiração automática.
+- **Consequências**: Prevenção de auto-elevação de privilégios (*privilege escalation*), controle estrito via RLS e segurança em profundidade sem chaves privilegiadas no Flutter.
+
+---
+
+## ADR-007: Roteamento Declarativo com GoRouter Reativo ao AuthState
+
+- **Status**: Aceito.
+- **Contexto**: A aplicação possui múltiplos estados de ciclo de vida do usuário: não autenticado, carregando, aguardando autorização (sem congregação nem convite), múltiplos convites pendentes, múltiplas congregações ativas ou totalmente autorizado.
+- **Decisão**: Utilizar `GoRouter` integrado ao Riverpod via `RouterNotifier` escutando a hierarquia tipada `AuthState`. Todas as decisões de redirecionamento são centralizadas no `RouterNotifier.redirect`, sem duplicação de regras em widgets ou páginas.
+- **Consequências**: Fluxo previsível e consistente em todas as plataformas (Web, Desktop, Mobile), com smoke tests automatizados no Flutter Test cobrindo todos os cenários.

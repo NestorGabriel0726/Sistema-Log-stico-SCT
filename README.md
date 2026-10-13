@@ -97,9 +97,25 @@ Consulte o guia completo em [SETUP.md](file:///c:/Users/232.953513/Desktop/Proje
 # 1. Instalar dependências Flutter
 flutter pub get
 
-# 2. Executar análise estática
+# 2. Executar análise estática (0 erros/avisos)
 flutter analyze
 
-# 3. Executar testes
+# 3. Executar testes automatizados (24 testes aprovados)
 flutter test
 ```
+
+---
+
+## 📌 Status do Desenvolvimento
+
+- **Fase 0 (Fundação Arquitetural e Design System)**: Concluída ✅
+- **Fase 1 (Autenticação Google, Perfis, Congregações, Convites e Rotas Protegidas)**: Concluída ✅
+  - Autenticação Google via Supabase Auth com persistência e recuperação de sessão;
+  - Criação automática e idempotente de perfis via trigger e RPC `ensure_profile_exists()`;
+  - Vinculação com congregações e suporte a congregação única ou múltipla com tela de seleção;
+  - Fluxo seguro de convites atômicos com RPC `accept_invitation()`, validação estrita de destinatário e expiração;
+  - Estado explícito e tela de usuário aguardando autorização (`AuthStatePendingAuthorization`);
+  - Repositórios e providers Riverpod com StateNotifier (`AuthNotifier`);
+  - Roteamento protegido por `GoRouter` e `RouterNotifier`;
+  - Telas: Login, Autorização Pendente, Convites Pendentes e Seleção de Congregação.
+- **Fase 2 (Eventos, Veículos, Passageiros, Alocações e Finanças)**: A iniciar.

@@ -1,22 +1,41 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/network/supabase_service.dart';
+import '../providers/auth_provider.dart';
+import '../providers/auth_state.dart';
 
 /// Tela exibida quando o usuário loga com Google mas ainda não possui convite ou congregação vinculada (Seção 13).
-class PendingApprovalPage extends StatelessWidget {
+class PendingApprovalPage extends ConsumerWidget {
   const PendingApprovalPage({super.key});
 
-  Future<void> _handleSignOut(BuildContext context) async {
-    await SupabaseService.client.auth.signOut();
-  }
-
   @override
-  Widget build(BuildContext context) {
-    final email = SupabaseService.currentUserEmail ?? 'Usuário';
+  Widget build(BuildContext context, WidgetRef ref) {
+    final authState = ref.watch(authNotifierProvider);
+
+    String email = SupabaseService.currentUserEmail ?? 'Usuário';
+    if (authState is AuthStatePendingAuthorization) {
+      email = authState.profile.email;
+    }
 
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Autorização Pendente'),
+        actions: [
+          IconButton(
+            tooltip: 'Verificar status',
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: () => ref.read(authNotifierProvider.notifier).refreshUserStatus(),
+          ),
+          IconButton(
+            tooltip: 'Sair da Conta',
+            icon: const Icon(Icons.logout_rounded),
+            onPressed: () => ref.read(authNotifierProvider.notifier).signOut(),
+          ),
+        ],
+      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.lg),
@@ -58,10 +77,22 @@ class PendingApprovalPage extends StatelessWidget {
                       style: AppTypography.bodySmall,
                     ),
                     const SizedBox(height: AppSpacing.xl),
-                    OutlinedButton.icon(
-                      onPressed: () => _handleSignOut(context),
-                      icon: const Icon(Icons.logout_rounded),
-                      label: const Text('Sair da Conta'),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: AppSpacing.sm,
+                      runSpacing: AppSpacing.sm,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () => ref.read(authNotifierProvider.notifier).refreshUserStatus(),
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Atualizar Status'),
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: () => ref.read(authNotifierProvider.notifier).signOut(),
+                          icon: const Icon(Icons.logout_rounded),
+                          label: const Text('Sair da Conta'),
+                        ),
+                      ],
                     ),
                   ],
                 ),
