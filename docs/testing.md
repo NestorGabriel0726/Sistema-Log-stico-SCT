@@ -18,6 +18,7 @@ Focados em lógica de domínio, estados de autenticação, roteamento e renderiz
 - **Entidade Congregation e Permissões** (`congregation_test.dart`): parse e display de papéis de congregação (`MemberRole`);
 - **Entidade Invitation e Expiração** (`invitation_test.dart`): validação de convites pendentes, expirados e display de papéis;
 - **Smoke Tests e Roteamento** (`widget_test.dart`): teste de renderização da tela de login para deslogados, acesso protegido a eventos para autorizados e tela de aviso para usuários aguardando autorização.
+- **Parse de eventos** (`transport_event_model_test.dart`): contagens agregadas e formatação de período.
 
 ### 1.2 Testes de Banco de Dados, RLS e Funções RPC (PostgreSQL)
 Implementados em `supabase/tests/database_security_test.sql` cobrindo 14 cenários com rollback automático:

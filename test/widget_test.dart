@@ -1,92 +1,22 @@
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:transport_logistics/app/app.dart';
-import 'package:transport_logistics/features/auth/domain/entities/user_profile.dart';
-import 'package:transport_logistics/features/auth/presentation/providers/auth_provider.dart';
-import 'package:transport_logistics/features/auth/presentation/providers/auth_state.dart';
-import 'package:transport_logistics/features/congregations/domain/entities/congregation.dart';
 
 void main() {
-  group('Smoke Tests e Roteamento Autenticado (Fase 1)', () {
-    testWidgets('Usuário deslogado/inicial é direcionado para a tela de Login', (WidgetTester tester) async {
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            authNotifierProvider.overrideWith(
-              (ref) => AuthNotifier.withState(const AuthStateUnauthenticated()),
-            ),
-          ],
-          child: const TransportLogisticsApp(),
-        ),
-      );
+  testWidgets('Fluxo local: welcome e painel de eventos', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 900));
+    await tester.pumpWidget(const ProviderScope(child: TransportApp()));
+    await tester.pumpAndSettle();
 
-      await tester.pumpAndSettle();
+    expect(find.text('Transporte SCT'), findsOneWidget);
+    expect(find.text('Entrar no painel'), findsOneWidget);
 
-      expect(find.text('Gestão de Transporte'), findsOneWidget);
-      expect(find.text('Entrar com Conta Google'), findsOneWidget);
-    });
+    await tester.ensureVisible(find.text('Entrar no painel'));
+    await tester.tap(find.text('Entrar no painel'));
+    await tester.pumpAndSettle();
 
-    testWidgets('Usuário autenticado e autorizado acessa a tela de Eventos de Transporte', (WidgetTester tester) async {
-      final authorizedState = AuthStateAuthorized(
-        profile: UserProfile(
-          id: 'usr-1',
-          email: 'coordenador@exemplo.com',
-          fullName: 'Coordenador do Evento',
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-        activeCongregation: const Congregation(
-          id: 'cong-1',
-          name: 'Congregação Central',
-          city: 'São Paulo',
-          state: 'SP',
-          countryCode: 'BR',
-          currentUserRole: MemberRole.coordinator,
-        ),
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            authNotifierProvider.overrideWith(
-              (ref) => AuthNotifier.withState(authorizedState),
-            ),
-          ],
-          child: const TransportLogisticsApp(),
-        ),
-      );
-
-      await tester.pumpAndSettle();
-
-      expect(find.text('Eventos de Transporte'), findsOneWidget);
-    });
-
-    testWidgets('Usuário aguardando autorização visualiza tela de aviso', (WidgetTester tester) async {
-      final pendingState = AuthStatePendingAuthorization(
-        profile: UserProfile(
-          id: 'usr-2',
-          email: 'novo.usuario@exemplo.com',
-          fullName: 'Novo Usuário',
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            authNotifierProvider.overrideWith(
-              (ref) => AuthNotifier.withState(pendingState),
-            ),
-          ],
-          child: const TransportLogisticsApp(),
-        ),
-      );
-
-      await tester.pumpAndSettle();
-
-      expect(find.text('Acesso Aguardando Autorização'), findsOneWidget);
-      expect(find.textContaining('novo.usuario@exemplo.com'), findsOneWidget);
-    });
+    expect(find.text('Eventos'), findsOneWidget);
+    expect(find.textContaining('Declare as Boas Novas'), findsOneWidget);
   });
 }

@@ -2,6 +2,55 @@
 
 Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 
+## [2.1.0] - 2026-10-14 - MVP operacional local (sem Supabase)
+
+### Adicionado
+- CRUD de eventos, veículos e passagens/passageiros com dias individuais.
+- Filtros de passagens (financeiro / dados / OK) e de passageiros.
+- Alocação em lista numerada, desistência com substituto e realocação entre veículos.
+- Dashboard com gráfico de passageiros por dia, prazos e lotação.
+- Quatro papéis e toggles de check-in.
+- Persistência local via SharedPreferences.
+- Formulários de evento e passagem, autocomplete de cadastro e regra de isenção por idade.
+
+## [2.0.0] - 2026-10-14 - Reformulação: app local, UI nova, código enxuto
+
+### Adicionado
+- Backend em memória (`LocalAppStore`) com seed de demonstração.
+- Nova identidade visual (Plus Jakarta Sans, layout simplificado).
+- Fluxo: welcome → eventos → detalhe com abas operacionais.
+
+### Removido (do app Flutter)
+- Dependências Supabase/Google Sign-In e camada `features/*` anterior.
+- Realtime, convites multi-etapa e telas legadas.
+
+### Mantido
+- Pasta `supabase/` intacta para integração futura.
+- Regras de domínio em `domain_calculations.dart`.
+
+## [0.2.0] - 2026-10-14 - Fase 2 (início): Integração operacional Flutter ↔ Supabase
+
+### Adicionado
+- Feature **events** completa (domain/data/providers) com lista e detalhe integrados ao banco.
+- Módulos **people**, **vehicles**, **passengers**, **allocations**, **checkins**, **passages**, **notifications** com data sources e providers Riverpod.
+- Consumo das views `vehicle_daily_capacity_summary` e `passage_financial_summary` no dashboard (respeitando permissões).
+- Realtime: `RealtimeSubscriptionManager`, `realtimeConnectionProvider` e `RealtimeConnectionBadge`.
+- Script `scripts/validate-dev.ps1`, workflow CI `.github/workflows/flutter.yml`, checklist `docs/staging-checklist.md`.
+- Edge Function stub `supabase/functions/push-notification`.
+- Teste unitário `transport_event_model_test.dart`.
+
+### Alterado
+- Documentação alinhada ao uso de `--dart-define` em [SETUP.md](SETUP.md) e [.env.example](.env.example).
+- [README.md](README.md): estrutura real de `lib/features/` e status da Fase 2.
+- `appRouter` marcado como `@Deprecated` — usar `routerProvider`.
+
+## [0.1.1] - 2026-10-13 - Fase 1: Autenticação, Convites e Rotas Protegidas
+
+### Adicionado
+- Migration `20261013160000_phase1_auth_invitations.sql` (trigger de perfil, RPCs de convites, memberships).
+- Fluxo Flutter: Google OAuth, `AuthState`, GoRouter reativo, telas de convites e congregação.
+- Testes Flutter de auth/convites e script SQL `supabase/tests/database_security_test.sql`.
+
 ## [0.1.0] - 2026-10-09 - Fase 0: Arquitetura Base e Infraestrutura como Código
 
 ### Adicionado

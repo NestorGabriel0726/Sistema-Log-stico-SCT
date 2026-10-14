@@ -9,7 +9,7 @@ Este documento estabelece o fluxo de desenvolvimento, testes e implantação do 
 | Ambiente | Banco de Dados | Domínio/Aplicação | Objetivo |
 | :--- | :--- | :--- | :--- |
 | **Local (Dev)** | Supabase CLI Docker Local (`127.0.0.1:54322`) | Emulador Android, Chrome Local, Windows | Desenvolvimento diário, testes de migrations e seeds. |
-| **Staging** | Projeto Supabase Staging Remoto | Preview Web / TestFlight / Firebase App Distribution | Homologação com coordenadores e capitães voluntários. |
+| **Staging** | Projeto Supabase Staging Remoto | Preview Web / TestFlight / Firebase App Distribution | Homologação com coordenadores e capitães voluntários. Ver [staging-checklist.md](staging-checklist.md). |
 | **Production** | Projeto Supabase Production Remoto | Web Domínio Próprio / Google Play / App Store | Uso oficial durante assembleias e congressos. |
 
 ---

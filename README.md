@@ -1,121 +1,33 @@
-# Sistema de Gestão Logística de Transporte para Assembleias e Congressos
+# Transporte SCT
 
-Aplicação multiplataforma profissional desenvolvida em **Flutter + Dart** com backend gerenciado via **Supabase (PostgreSQL, Auth, Realtime, Storage, Edge Functions)**.
+App Flutter **local** para gestão de transporte de congregação em assembleias e congressos. Sem Supabase nesta fase: os dados ficam neste aparelho e sobrevivem ao fechar o app.
 
-O sistema funciona como um **quadro branco digital colaborativo e estruturado** para controle de transporte em Assembleias de Circuito e Congressos Regionais, priorizando:
-- **Flexibilidade operacional** (alterações e transferências de última hora);
-- **Sincronização em tempo real** entre múltiplos dispositivos sem necessidade de recarregar a página;
-- **Integridade dos dados e defesa em profundidade** através de PostgreSQL Database Functions e Row Level Security (RLS);
-- **Rastreabilidade e auditoria obrigatória** de todas as ações operacionais e financeiras;
-- **Privacidade por perfil**: Capitães de ônibus possuem acesso operacional completo à lista e check-in, mas **bloqueio absoluto a valores financeiros, pagamentos e fotos de recibos**.
+## O que já funciona
 
----
+- Quatro perfis: coordenador, ajudante do coordenador, capitão e ajudante do capitão
+- CRUD de eventos, prazos, valor da diária e idade mínima de cobrança
+- Veículos com capacidade física × limite local
+- Passagens (quem paga) vs passageiros (quem viaja), dias individuais, PIX/espécie, comprovante em texto
+- Autocomplete de nomes já cadastrados e bloqueio de isenção se a criança já tiver a idade na data do evento
+- Listas numeradas, alocação, desistência (vaga seca ou substituto) e realocação entre ônibus
+- Filtros em passagens e passageiros
+- Dashboard com financeiro, gráfico por dia e lotação
+- Check-in ida/volta com toggle por perfil
+- Histórico de alterações
+- Persistência local (`shared_preferences`)
 
-## 🚀 Arquitetura Geral
+A pasta `supabase/` permanece no repositório para o amigo ligar o banco **depois**, na máquina dele.
 
-```text
-Flutter (Web, Android, iOS, Windows, macOS)
-  │
-  ▼
-State Management (Riverpod) & Navigation (GoRouter)
-  │
-  ▼
-Domain Use Cases & Entities
-  │
-  ▼
-Data Repositories & Data Sources
-  │
-  ▼
-Supabase Client (Auth, Realtime, Storage)
-  │
-  ▼
-PostgreSQL (RLS, Constraints, Triggers, Views, RPC Functions)
-```
-
----
-
-## 📋 Stack Tecnológica Oficial
-
-- **Frontend**: Flutter 3.44+ / Dart 3.12+ (Web, Android, iOS, Windows, macOS)
-- **Gerenciamento de Estado**: Flutter Riverpod
-- **Navegação**: GoRouter
-- **Design System**: Material 3 adaptativo (Mobile, Tablet, Desktop)
-- **Backend**: Supabase (PostgreSQL 17, Supabase Auth com Google OAuth, Supabase Realtime, Supabase Storage)
-- **Operações Críticas**: PostgreSQL Functions / RPCs transacionais atômicas
-
----
-
-## 📂 Estrutura do Repositório
-
-```text
-├── lib/
-│   ├── app/                    # Inicialização do app e GoRouter
-│   ├── core/                   # Design system, temas, erros, rede, i18n
-│   │   ├── error/
-│   │   ├── localization/
-│   │   ├── network/
-│   │   ├── theme/
-│   │   └── utils/
-│   └── features/               # Arquitetura modular por funcionalidade
-│       ├── auth/
-│       ├── congregations/
-│       ├── events/
-│       ├── people/
-│       ├── passages/
-│       ├── payments/
-│       ├── vehicles/
-│       ├── allocations/
-│       ├── checkins/
-│       ├── notifications/
-│       ├── audit/
-│       └── dashboard/
-├── supabase/
-│   ├── config.toml             # Configuração do Supabase CLI
-│   ├── migrations/             # Migrações versionadas do banco (IaC)
-│   ├── functions/              # Edge Functions
-│   └── seed.sql                # Dados simulados para desenvolvimento
-├── docs/                       # Documentação técnica aprofundada
-│   ├── database.md             # Esquema ER e relacionamentos
-│   ├── permissions.md          # Matriz de autorização e RLS
-│   ├── realtime.md             # Estratégia de sincronização em tempo real
-│   ├── notifications.md        # Arquitetura de notificações in-app e push
-│   ├── deployment.md           # Guia de ambientes e deploy
-│   ├── decision-log.md         # Registro de decisões de arquitetura (ADRs)
-│   └── testing.md              # Estratégia e execução de testes
-├── SETUP.md                    # Passo a passo detalhado para desenvolvedores
-├── ARCHITECTURE.md             # Visão profunda da arquitetura
-└── CHANGELOG.md                # Histórico de versões
-```
-
----
-
-## ⚡ Como Começar
-
-Consulte o guia completo em [SETUP.md](file:///c:/Users/232.953513/Desktop/Projeto%20Nestor/SETUP.md).
+## Rodar
 
 ```powershell
-# 1. Instalar dependências Flutter
 flutter pub get
-
-# 2. Executar análise estática (0 erros/avisos)
-flutter analyze
-
-# 3. Executar testes automatizados (24 testes aprovados)
-flutter test
+flutter run -d windows
+# ou: flutter run -d chrome
 ```
 
----
+Se o Flutter não estiver no PATH:
 
-## 📌 Status do Desenvolvimento
-
-- **Fase 0 (Fundação Arquitetural e Design System)**: Concluída ✅
-- **Fase 1 (Autenticação Google, Perfis, Congregações, Convites e Rotas Protegidas)**: Concluída ✅
-  - Autenticação Google via Supabase Auth com persistência e recuperação de sessão;
-  - Criação automática e idempotente de perfis via trigger e RPC `ensure_profile_exists()`;
-  - Vinculação com congregações e suporte a congregação única ou múltipla com tela de seleção;
-  - Fluxo seguro de convites atômicos com RPC `accept_invitation()`, validação estrita de destinatário e expiração;
-  - Estado explícito e tela de usuário aguardando autorização (`AuthStatePendingAuthorization`);
-  - Repositórios e providers Riverpod com StateNotifier (`AuthNotifier`);
-  - Roteamento protegido por `GoRouter` e `RouterNotifier`;
-  - Telas: Login, Autorização Pendente, Convites Pendentes e Seleção de Congregação.
-- **Fase 2 (Eventos, Veículos, Passageiros, Alocações e Finanças)**: A iniciar.
+```powershell
+.\scripts\run.ps1
+```
