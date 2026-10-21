@@ -24,6 +24,12 @@ class LocalAppStore extends ChangeNotifier {
   List<PersonMemory> _people = [];
   List<ActivityEntry> _activity = [];
   bool _hydrated = false;
+  String? _lastPersistError;
+  Future<void> _persistChain = Future<void>.value();
+
+  /// Quando true, a próxima gravação falha de propósito (somente testes).
+  @visibleForTesting
+  bool failNextPersist = false;
 
   LocalAppStore() {
     applySeed();
@@ -31,6 +37,13 @@ class LocalAppStore extends ChangeNotifier {
 
   AppUser? get user => _user;
   bool get hydrated => _hydrated;
+  String? get lastPersistError => _lastPersistError;
+
+  void clearPersistError() {
+    if (_lastPersistError == null) return;
+    _lastPersistError = null;
+    notifyListeners();
+  }
 
   void applySeed() {
     _events = [SeedData.demoEvent];
@@ -50,29 +63,50 @@ class LocalAppStore extends ChangeNotifier {
       final raw = prefs.getString(_prefsKey);
       if (raw != null) {
         _fromMap(jsonDecode(raw) as Map<String, dynamic>);
+        _lastPersistError = null;
       }
-    } catch (_) {
-      // testes / ambiente sem prefs
+    } catch (e, st) {
+      debugPrint('LocalAppStore.hydrate falhou: $e\n$st');
+      _lastPersistError = 'Não foi possível carregar os dados salvos neste aparelho.';
     }
     _hydrated = true;
     notifyListeners();
   }
 
+  /// Aguarda a fila de gravações pendentes (útil em testes e ao sair da tela).
+  Future<void> flushPersist() => _persistChain;
+
   Future<void> _persist() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_prefsKey, jsonEncode(_toMap()));
-    } catch (_) {}
+    if (failNextPersist) {
+      failNextPersist = false;
+      throw StateError('Falha simulada de persistência');
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsKey, jsonEncode(_toMap()));
   }
 
   void _changed() {
     notifyListeners();
-    _persist();
+    _persistChain = _persistChain.then((_) async {
+      try {
+        await _persist();
+        if (_lastPersistError != null) {
+          _lastPersistError = null;
+          notifyListeners();
+        }
+      } catch (e, st) {
+        debugPrint('LocalAppStore.persist falhou: $e\n$st');
+        _lastPersistError =
+            'Não foi possível salvar as alterações neste aparelho. Tente de novo.';
+        notifyListeners();
+      }
+    });
   }
 
   Future<void> resetDemo() async {
     applySeed();
     _changed();
+    await flushPersist();
   }
 
   void signIn({
@@ -304,7 +338,11 @@ class LocalAppStore extends ChangeNotifier {
         finalListDeadline: finalListDeadline,
       ),
     );
-    _rebuildDays(id, start, end);
+    final daysResult = _syncEventDays(id, start, end);
+    if (!daysResult.ok) {
+      _events.removeWhere((e) => e.id == id);
+      return daysResult;
+    }
     _log(id, 'Evento "$theme" criado.');
     _changed();
     return StoreResult.ok(id);
@@ -314,32 +352,107 @@ class LocalAppStore extends ChangeNotifier {
     final i = _events.indexWhere((e) => e.id == updated.id);
     if (i < 0) return const StoreResult.error('Evento não encontrado.');
     final old = _events[i];
-    _events[i] = updated;
     if (old.startDate != updated.startDate || old.endDate != updated.endDate) {
-      _rebuildDays(updated.id, updated.startDate, updated.endDate);
+      final daysResult = _syncEventDays(updated.id, updated.startDate, updated.endDate);
+      if (!daysResult.ok) return daysResult;
     }
+    _events[i] = updated;
     _log(updated.id, 'Configurações do evento atualizadas.');
     _changed();
     return const StoreResult.ok();
   }
 
-  void _rebuildDays(String eventId, DateTime start, DateTime end) {
-    _days.removeWhere((d) => d.eventId == eventId);
-    var cursor = DateTime(start.year, start.month, start.day);
-    final last = DateTime(end.year, end.month, end.day);
-    var seq = 1;
-    while (!cursor.isAfter(last)) {
-      _days.add(
-        EventDay(
-          id: '$eventId-day-$seq',
-          eventId: eventId,
-          date: cursor,
-          label: AppFormatters.weekday(cursor),
-        ),
-      );
-      cursor = cursor.add(const Duration(days: 1));
-      seq++;
+  /// Mantém IDs de dias cujas datas continuam no intervalo; só cria IDs novos
+  /// para datas novas; bloqueia remoção de dias com dependências.
+  StoreResult _syncEventDays(String eventId, DateTime start, DateTime end) {
+    if (end.isBefore(start)) {
+      return const StoreResult.error('Data final inválida.');
     }
+
+    final existing = _days.where((d) => d.eventId == eventId).toList();
+    final existingByDate = <DateTime, EventDay>{
+      for (final d in existing) _dateOnly(d.date): d,
+    };
+
+    final desiredDates = <DateTime>[];
+    var cursor = _dateOnly(start);
+    final last = _dateOnly(end);
+    while (!cursor.isAfter(last)) {
+      desiredDates.add(cursor);
+      cursor = cursor.add(const Duration(days: 1));
+    }
+    final desiredSet = desiredDates.toSet();
+
+    for (final day in existing) {
+      final key = _dateOnly(day.date);
+      if (desiredSet.contains(key)) continue;
+      final deps = _describeDayDependencies(eventId, day.id);
+      if (deps != null) {
+        return StoreResult.error(
+          'Não é possível remover o dia ${day.label} (${AppFormatters.date(day.date)}): '
+          'existem $deps. Reatribua ou remova esses vínculos antes de alterar as datas.',
+        );
+      }
+    }
+
+    final next = <EventDay>[];
+    for (final date in desiredDates) {
+      final kept = existingByDate[date];
+      if (kept != null) {
+        next.add(
+          EventDay(
+            id: kept.id,
+            eventId: eventId,
+            date: date,
+            label: AppFormatters.weekday(date),
+          ),
+        );
+      } else {
+        next.add(
+          EventDay(
+            id: _uuid.v4(),
+            eventId: eventId,
+            date: date,
+            label: AppFormatters.weekday(date),
+          ),
+        );
+      }
+    }
+
+    _days
+      ..removeWhere((d) => d.eventId == eventId)
+      ..addAll(next);
+    return const StoreResult.ok();
+  }
+
+  DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  /// Retorna descrição das dependências ou null se o dia puder ser removido.
+  String? _describeDayDependencies(String eventId, String dayId) {
+    final passengerCount =
+        _passengers.where((p) => p.eventId == eventId && p.dayIds.contains(dayId)).length;
+    final allocationCount = _allocations.where((a) {
+      if (a.dayId != dayId) return false;
+      final p = passengerById(a.passengerId);
+      return p != null && p.eventId == eventId;
+    }).length;
+
+    // Pagamentos ficam na passagem (paidCents), não por dia; a dependência
+    // financeira relevante para o dia é via passageiros daquele dia.
+    if (passengerCount == 0 && allocationCount == 0) return null;
+
+    final parts = <String>[];
+    if (passengerCount > 0) {
+      parts.add(
+        passengerCount == 1 ? '1 passageiro vinculado' : '$passengerCount passageiros vinculados',
+      );
+    }
+    if (allocationCount > 0) {
+      parts.add(
+        allocationCount == 1 ? '1 alocação' : '$allocationCount alocações',
+      );
+    }
+    return parts.join(' e ');
   }
 
   StoreResult addVehicle({
@@ -385,21 +498,16 @@ class LocalAppStore extends ChangeNotifier {
     return const StoreResult.ok();
   }
 
-  StoreResult createPassage({
-    required String eventId,
+  StoreResult? _validatePassageInput({
+    required TransportEvent event,
     required String buyerName,
-    required int paidCents,
-    required PaymentMethod method,
     required List<PassengerDraft> passengers,
-    List<String> receiptNotes = const [],
     bool confirmBypass = false,
+    bool enforceDeadline = true,
   }) {
-    if (!_canEdit()) return const StoreResult.error('Sem permissão.');
-    final event = eventById(eventId);
-    if (event == null) return const StoreResult.error('Evento não encontrado.');
     if (buyerName.trim().isEmpty) return const StoreResult.error('Informe o comprador.');
     if (passengers.isEmpty) return const StoreResult.error('Inclua ao menos um passageiro.');
-    if (event.passageDeadlinePassed && !confirmBypass) {
+    if (enforceDeadline && event.passageDeadlinePassed && !confirmBypass) {
       return const StoreResult.confirm(
         'O prazo de passagens já passou. Registrar mesmo assim? A exceção será gravada no histórico.',
       );
@@ -418,6 +526,28 @@ class LocalAppStore extends ChangeNotifier {
         return StoreResult.error('${d.name}: informe o responsável.');
       }
     }
+    return null;
+  }
+
+  StoreResult createPassage({
+    required String eventId,
+    required String buyerName,
+    required int paidCents,
+    required PaymentMethod method,
+    required List<PassengerDraft> passengers,
+    List<String> receiptNotes = const [],
+    bool confirmBypass = false,
+  }) {
+    if (!_canEdit()) return const StoreResult.error('Sem permissão.');
+    final event = eventById(eventId);
+    if (event == null) return const StoreResult.error('Evento não encontrado.');
+    final validation = _validatePassageInput(
+      event: event,
+      buyerName: buyerName,
+      passengers: passengers,
+      confirmBypass: confirmBypass,
+    );
+    if (validation != null) return validation;
 
     final passageId = _uuid.v4();
     final ids = <String>[];
@@ -434,7 +564,7 @@ class LocalAppStore extends ChangeNotifier {
         birthDate: d.birthDate,
         category: d.category,
         responsibleName: d.responsibleName,
-        dayIds: d.dayIds,
+        dayIds: List<String>.from(d.dayIds),
       );
       _passengers.add(passenger);
       _rememberPerson(passenger);
@@ -456,6 +586,122 @@ class LocalAppStore extends ChangeNotifier {
       eventId,
       'Passagem de ${buyerName.trim()} (${ids.length} passageiro(s))'
       '${event.passageDeadlinePassed ? ' — após o prazo (exceção)' : ''}.',
+    );
+    _changed();
+    return const StoreResult.ok();
+  }
+
+  /// Atualiza metadados editáveis e passageiros vinculados.
+  /// Preserva `id`, `createdAt`, `paidCents` e `receiptNotes` (histórico financeiro).
+  StoreResult updatePassage({
+    required String passageId,
+    required String eventId,
+    required String buyerName,
+    required PaymentMethod method,
+    required List<PassengerDraft> passengers,
+  }) {
+    if (!_canEdit()) return const StoreResult.error('Sem permissão.');
+    final index = _passages.indexWhere((p) => p.id == passageId);
+    if (index < 0) return const StoreResult.error('Passagem não encontrada.');
+    final current = _passages[index];
+    if (current.eventId != eventId) {
+      return const StoreResult.error('A passagem não pertence a este evento.');
+    }
+    final event = eventById(eventId);
+    if (event == null) return const StoreResult.error('Evento não encontrado.');
+
+    final validation = _validatePassageInput(
+      event: event,
+      buyerName: buyerName,
+      passengers: passengers,
+      enforceDeadline: false,
+    );
+    if (validation != null) return validation;
+
+    final existingIds = current.passengerIds.toSet();
+    final keptIds = <String>{};
+    for (final d in passengers) {
+      final id = d.id;
+      if (id == null) continue;
+      if (!existingIds.contains(id)) {
+        return StoreResult.error('Passageiro inválido na passagem: ${d.name}.');
+      }
+      final p = passengerById(id);
+      if (p == null || p.passageId != passageId || p.eventId != eventId) {
+        return StoreResult.error('Passageiro inválido na passagem: ${d.name}.');
+      }
+      keptIds.add(id);
+    }
+
+    final removedIds = existingIds.difference(keptIds);
+    for (final removedId in removedIds) {
+      final activeAlloc = _allocations.any(
+        (a) => a.passengerId == removedId && a.isActive,
+      );
+      if (activeAlloc) {
+        final name = passengerById(removedId)?.name ?? removedId;
+        return StoreResult.error(
+          'Não é possível remover $name: ainda há alocação ativa. '
+          'Desfaça a alocação antes.',
+        );
+      }
+    }
+
+    final nextPassengerIds = <String>[];
+    for (final d in passengers) {
+      if (d.id != null) {
+        final pi = _passengers.indexWhere((p) => p.id == d.id);
+        if (pi < 0) return StoreResult.error('Passageiro não encontrado: ${d.name}.');
+        final updated = _passengers[pi].copyWith(
+          name: d.name.trim(),
+          documentType: d.documentType,
+          documentNumber: d.documentNumber,
+          birthDate: d.birthDate,
+          category: d.category,
+          responsibleName: d.responsibleName,
+          dayIds: List<String>.from(d.dayIds),
+        );
+        _passengers[pi] = updated;
+        _rememberPerson(updated);
+        nextPassengerIds.add(d.id!);
+      } else {
+        final pid = _uuid.v4();
+        final passenger = Passenger(
+          id: pid,
+          eventId: eventId,
+          passageId: passageId,
+          name: d.name.trim(),
+          documentType: d.documentType,
+          documentNumber: d.documentNumber,
+          birthDate: d.birthDate,
+          category: d.category,
+          responsibleName: d.responsibleName,
+          dayIds: List<String>.from(d.dayIds),
+        );
+        _passengers.add(passenger);
+        _rememberPerson(passenger);
+        nextPassengerIds.add(pid);
+      }
+    }
+
+    for (final removedId in removedIds) {
+      _passengers.removeWhere((p) => p.id == removedId);
+      _allocations.removeWhere((a) => a.passengerId == removedId);
+      _checkIns.removeWhere((c) {
+        // check-ins órfãos de alocações já removidas — limpeza por alocação ausente
+        return !_allocations.any((a) => a.id == c.allocationId);
+      });
+    }
+
+    // paidCents e receiptNotes permanece — histórico financeiro intacto.
+    _passages[index] = current.copyWith(
+      buyerName: buyerName.trim(),
+      paymentMethod: method,
+      passengerIds: nextPassengerIds,
+    );
+    _log(
+      eventId,
+      'Passagem de ${buyerName.trim()} atualizada (${nextPassengerIds.length} passageiro(s)).',
     );
     _changed();
     return const StoreResult.ok();
@@ -785,6 +1031,8 @@ class LocalAppStore extends ChangeNotifier {
 }
 
 class PassengerDraft {
+  /// ID do passageiro existente (modo edição). Null = novo passageiro.
+  final String? id;
   final String name;
   final String? documentType;
   final String? documentNumber;
@@ -794,6 +1042,7 @@ class PassengerDraft {
   final List<String> dayIds;
 
   const PassengerDraft({
+    this.id,
     required this.name,
     this.documentType,
     this.documentNumber,

@@ -1,12 +1,24 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:transport_logistics/data/local_app_store.dart';
 import 'package:transport_logistics/data/seed_data.dart';
 import 'package:transport_logistics/domain/models.dart';
 
 void main() {
-  test('seed, check-in e desistência liberam vaga', () {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+  });
+
+  LocalAppStore signedStore() {
     final store = LocalAppStore();
     store.signIn(name: 'Carlos', role: UserRole.coordinator);
+    return store;
+  }
+
+  test('seed, check-in e desistência liberam vaga', () {
+    final store = signedStore();
 
     expect(store.listEvents().single.id, SeedData.eventId);
     expect(store.passengersForEvent(SeedData.eventId).length, 6);
@@ -15,15 +27,16 @@ void main() {
     expect(result.ok, isTrue);
     expect(store.hasCheckIn('a1', 'OUTBOUND'), isTrue);
 
-    final before = store.allocationsForVehicleDay('bus-1', 'day-1').where((a) => a.isActive).length;
+    final before =
+        store.allocationsForVehicleDay('bus-1', 'day-1').where((a) => a.isActive).length;
     store.markDesisted(allocationId: 'a1');
-    final after = store.allocationsForVehicleDay('bus-1', 'day-1').where((a) => a.isActive).length;
+    final after =
+        store.allocationsForVehicleDay('bus-1', 'day-1').where((a) => a.isActive).length;
     expect(after, before - 1);
   });
 
   test('isenção inválida é recusada na passagem', () {
-    final store = LocalAppStore();
-    store.signIn(name: 'Carlos', role: UserRole.coordinator);
+    final store = signedStore();
     final event = store.eventById(SeedData.eventId)!;
     final err = store.validateExemption(
       category: PassengerCategory.exempt,
@@ -31,5 +44,242 @@ void main() {
       event: event,
     );
     expect(err, isNotNull);
+  });
+
+  group('integridade de dias do evento', () {
+    test('preserva IDs de dias cujas datas continuam no intervalo', () {
+      final store = signedStore();
+      final before = store.daysForEvent(SeedData.eventId);
+      final idDay1 = before.firstWhere((d) => d.id == 'day-1').id;
+      final idDay2 = before.firstWhere((d) => d.id == 'day-2').id;
+      final event = store.eventById(SeedData.eventId)!;
+
+      // Amplia o período: dias 16–18 permanecem; 19 é novo.
+      final result = store.updateEvent(
+        event.copyWith(
+          startDate: DateTime(2026, 10, 16),
+          endDate: DateTime(2026, 10, 19),
+        ),
+      );
+      expect(result.ok, isTrue);
+
+      final after = store.daysForEvent(SeedData.eventId);
+      expect(after.length, 4);
+      expect(after.firstWhere((d) => d.date.day == 16).id, idDay1);
+      expect(after.firstWhere((d) => d.date.day == 17).id, idDay2);
+      expect(after.any((d) => d.date.day == 19), isTrue);
+      expect(after.where((d) => d.date.day == 19).single.id, isNot(anyOf(idDay1, idDay2, 'day-3')));
+    });
+
+    test('bloqueia remoção de dia com passageiros ou alocações', () {
+      final store = signedStore();
+      final event = store.eventById(SeedData.eventId)!;
+      final day1Before = store.daysForEvent(SeedData.eventId).map((d) => d.id).toSet();
+
+      // Tenta encolher para só domingo (18) — remove sex/sáb com dependências.
+      final result = store.updateEvent(
+        event.copyWith(
+          startDate: DateTime(2026, 10, 18),
+          endDate: DateTime(2026, 10, 18),
+        ),
+      );
+      expect(result.ok, isFalse);
+      expect(result.message, contains('Não é possível remover'));
+
+      final day1After = store.daysForEvent(SeedData.eventId).map((d) => d.id).toSet();
+      expect(day1After, day1Before);
+      expect(store.eventById(SeedData.eventId)!.startDate, DateTime(2026, 10, 16));
+    });
+
+    test('permite remover dia sem dependências', () {
+      final store = signedStore();
+      // Cria evento novo sem passageiros e depois reduz dias.
+      final created = store.createEvent(
+        theme: 'Evento limpo',
+        kind: EventKind.other,
+        start: DateTime(2027, 1, 1),
+        end: DateTime(2027, 1, 3),
+        dailyFareCents: 1000,
+      );
+      expect(created.ok, isTrue);
+      final eventId = created.message;
+      final event = store.eventById(eventId)!;
+      final days = store.daysForEvent(eventId);
+      expect(days.length, 3);
+
+      final shrunk = store.updateEvent(
+        event.copyWith(
+          startDate: DateTime(2027, 1, 2),
+          endDate: DateTime(2027, 1, 3),
+        ),
+      );
+      expect(shrunk.ok, isTrue);
+      final after = store.daysForEvent(eventId);
+      expect(after.length, 2);
+      expect(after.map((d) => d.date.day).toSet(), {2, 3});
+    });
+  });
+
+  group('updatePassage', () {
+    test('atualiza campos editáveis e preserva id e pagamentos', () {
+      final store = signedStore();
+      final original = store.passageById('pass-1')!;
+      final paidBefore = original.paidCents;
+      final notesBefore = List<String>.from(original.receiptNotes);
+      final createdAt = original.createdAt;
+      final expectedBefore = store.expectedCentsForPassage(original);
+
+      final p1 = store.passengerById('p1')!;
+      final p3 = store.passengerById('p3')!;
+
+      final result = store.updatePassage(
+        passageId: 'pass-1',
+        eventId: SeedData.eventId,
+        buyerName: 'Ana Silva Atualizada',
+        method: PaymentMethod.cash,
+        passengers: [
+          PassengerDraft(
+            id: p1.id,
+            name: p1.name,
+            documentType: p1.documentType,
+            documentNumber: p1.documentNumber,
+            category: p1.category,
+            dayIds: ['day-1', 'day-2'], // remove day-3 → esperado cai
+          ),
+          PassengerDraft(
+            id: p3.id,
+            name: p3.name,
+            documentType: p3.documentType,
+            documentNumber: p3.documentNumber,
+            birthDate: p3.birthDate,
+            category: p3.category,
+            responsibleName: p3.responsibleName,
+            dayIds: p3.dayIds,
+          ),
+        ],
+      );
+
+      expect(result.ok, isTrue);
+      final updated = store.passageById('pass-1')!;
+      expect(updated.id, 'pass-1');
+      expect(updated.buyerName, 'Ana Silva Atualizada');
+      expect(updated.paymentMethod, PaymentMethod.cash);
+      expect(updated.paidCents, paidBefore);
+      expect(updated.receiptNotes, notesBefore);
+      expect(updated.createdAt, createdAt);
+      expect(store.passengerById('p1')!.dayIds, ['day-1', 'day-2']);
+
+      final expectedAfter = store.expectedCentsForPassage(updated);
+      expect(expectedAfter, lessThan(expectedBefore));
+      expect(expectedAfter, 10000); // 2 dias × 50 para Ana; Lucas isento
+    });
+
+    test('addPayment soma sem confundir com edição', () {
+      final store = signedStore();
+      final before = store.passageById('pass-3')!.paidCents;
+      final pay = store.addPayment(passageId: 'pass-3', extraCents: 2500, receiptNote: 'PIX extra');
+      expect(pay.ok, isTrue);
+      expect(store.passageById('pass-3')!.paidCents, before + 2500);
+      expect(store.passageById('pass-3')!.receiptNotes, contains('PIX extra'));
+
+      final edit = store.updatePassage(
+        passageId: 'pass-3',
+        eventId: SeedData.eventId,
+        buyerName: 'Daniel Oliveira Editado',
+        method: PaymentMethod.pix,
+        passengers: [
+          PassengerDraft(
+            id: 'p4',
+            name: 'Daniel Oliveira',
+            category: PassengerCategory.adult,
+            dayIds: ['day-1'],
+          ),
+        ],
+      );
+      expect(edit.ok, isTrue);
+      expect(store.passageById('pass-3')!.paidCents, before + 2500);
+      expect(store.passageById('pass-3')!.receiptNotes, contains('PIX extra'));
+      expect(store.passageById('pass-3')!.buyerName, 'Daniel Oliveira Editado');
+    });
+
+    test('falha ao editar passagem inexistente', () {
+      final store = signedStore();
+      final result = store.updatePassage(
+        passageId: 'nao-existe',
+        eventId: SeedData.eventId,
+        buyerName: 'X',
+        method: PaymentMethod.pix,
+        passengers: [
+          PassengerDraft(name: 'Y', dayIds: ['day-1']),
+        ],
+      );
+      expect(result.ok, isFalse);
+      expect(result.message, contains('não encontrada'));
+    });
+
+    test('falha se passagem não pertence ao evento', () {
+      final store = signedStore();
+      final result = store.updatePassage(
+        passageId: 'pass-1',
+        eventId: 'outro-evento',
+        buyerName: 'Ana',
+        method: PaymentMethod.pix,
+        passengers: [
+          PassengerDraft(id: 'p1', name: 'Ana Silva', dayIds: ['day-1']),
+        ],
+      );
+      expect(result.ok, isFalse);
+      expect(result.message, contains('não pertence'));
+    });
+
+    test('persiste edição após hydrate', () async {
+      SharedPreferences.setMockInitialValues({});
+      final store = signedStore();
+      final edit = store.updatePassage(
+        passageId: 'pass-2',
+        eventId: SeedData.eventId,
+        buyerName: 'Bruno Persistido',
+        method: PaymentMethod.pix,
+        passengers: [
+          PassengerDraft(
+            id: 'p2',
+            name: 'Bruno Costa',
+            documentType: 'RG',
+            documentNumber: '12.345.678-9',
+            category: PassengerCategory.adult,
+            dayIds: ['day-1', 'day-2'],
+          ),
+        ],
+      );
+      expect(edit.ok, isTrue);
+      await store.flushPersist();
+      expect(store.lastPersistError, isNull);
+
+      final reloaded = LocalAppStore();
+      await reloaded.hydrate();
+      expect(reloaded.passageById('pass-2')!.buyerName, 'Bruno Persistido');
+      expect(reloaded.passageById('pass-2')!.paidCents, 5000);
+    });
+  });
+
+  group('persistência', () {
+    test('registra erro quando a gravação falha', () async {
+      final store = signedStore();
+      await store.flushPersist();
+
+      store.failNextPersist = true;
+      store.signOut();
+      await store.flushPersist();
+      expect(store.lastPersistError, isNotNull);
+      expect(store.lastPersistError, contains('salvar'));
+
+      store.clearPersistError();
+      expect(store.lastPersistError, isNull);
+
+      // Próxima gravação bem-sucedida limpa o estado.
+      store.signIn(name: 'Carlos', role: UserRole.coordinator);
+      await store.flushPersist();
+      expect(store.lastPersistError, isNull);
+    });
   });
 }

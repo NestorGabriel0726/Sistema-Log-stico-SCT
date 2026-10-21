@@ -624,26 +624,35 @@ class _PassagesTabState extends ConsumerState<PassagesTab> {
                     final st = store.financialStatus(g);
                     final names = g.passengerIds.map(store.passengerById).whereType<Passenger>().map((p) => p.name).join(', ');
                     return Card(
-                      child: ListTile(
-                        title: Text(g.buyerName),
-                        subtitle: Text(
-                          '${g.paymentMethod.label} • $names'
-                          '${g.deadlineBypass ? ' • após prazo' : ''}'
-                          '${g.receiptNotes.isEmpty ? '' : '\n${g.receiptNotes.join(', ')}'}',
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: ListTile(
+                          title: Text(g.buyerName),
+                          subtitle: Text(
+                            '${g.paymentMethod.label} • $names'
+                            '${g.deadlineBypass ? ' • após prazo' : ''}'
+                            '${g.receiptNotes.isEmpty ? '' : '\n${g.receiptNotes.join(', ')}'}',
+                          ),
+                          isThreeLine: true,
+                          trailing: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              TagChip.finance(st),
+                              Text(
+                                AppFormatters.cents(g.paidCents),
+                                style: const TextStyle(fontWeight: FontWeight.w800),
+                              ),
+                              Text(
+                                'de ${AppFormatters.cents(expected)}',
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                            ],
+                          ),
+                          onTap: store.user?.canEditOperations == true
+                              ? () => _openPassageActions(context, ref, g)
+                              : null,
                         ),
-                        isThreeLine: true,
-                        trailing: Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            TagChip.finance(st),
-                            Text(AppFormatters.cents(g.paidCents), style: const TextStyle(fontWeight: FontWeight.w800)),
-                            Text('de ${AppFormatters.cents(expected)}', style: const TextStyle(fontSize: 11)),
-                          ],
-                        ),
-                        onTap: store.user?.canEditOperations == true
-                            ? () => _addPayment(context, ref, g)
-                            : null,
                       ),
                     );
                   },
@@ -651,6 +660,56 @@ class _PassagesTabState extends ConsumerState<PassagesTab> {
         ),
       ],
     );
+  }
+
+  Future<void> _openPassageActions(
+    BuildContext context,
+    WidgetRef ref,
+    PassageGroup group,
+  ) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(group.buyerName),
+              subtitle: const Text('Escolha uma ação'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Editar passagem'),
+              subtitle: const Text('Comprador, forma de pagamento e passageiros'),
+              onTap: () => Navigator.pop(ctx, 'edit'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.payments_outlined),
+              title: const Text('Registrar pagamento'),
+              subtitle: const Text('Soma ao valor já recebido, sem apagar o histórico'),
+              onTap: () => Navigator.pop(ctx, 'pay'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!context.mounted || action == null) return;
+    if (action == 'edit') {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PassageFormPage(
+            eventId: widget.eventId,
+            passageId: group.id,
+          ),
+        ),
+      );
+      return;
+    }
+    if (action == 'pay') {
+      await _addPayment(context, ref, group);
+    }
   }
 
   Future<void> _addPayment(BuildContext context, WidgetRef ref, PassageGroup group) async {
@@ -663,8 +722,20 @@ class _PassagesTabState extends ConsumerState<PassagesTab> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Valor (R\$)')),
-            TextField(controller: note, decoration: const InputDecoration(labelText: 'Comprovante / nota')),
+            Text(
+              'Já recebido: ${AppFormatters.cents(group.paidCents)}',
+              style: Theme.of(ctx).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: amount,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Valor adicional (R\$)'),
+            ),
+            TextField(
+              controller: note,
+              decoration: const InputDecoration(labelText: 'Comprovante / nota'),
+            ),
           ],
         ),
         actions: [
@@ -675,11 +746,12 @@ class _PassagesTabState extends ConsumerState<PassagesTab> {
     );
     if (ok != true) return;
     final reais = double.tryParse(amount.text.replaceAll(',', '.')) ?? 0;
-    final result = ref.read(localStoreProvider).addPayment(
-          passageId: group.id,
-          extraCents: (reais * 100).round(),
-          receiptNote: note.text,
-        );
+    final store = ref.read(localStoreProvider);
+    final result = store.addPayment(
+      passageId: group.id,
+      extraCents: (reais * 100).round(),
+      receiptNote: note.text,
+    );
     if (context.mounted) await showStoreMessage(context, result);
   }
 }
