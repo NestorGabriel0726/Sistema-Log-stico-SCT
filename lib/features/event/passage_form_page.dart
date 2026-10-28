@@ -209,6 +209,10 @@ class _PassageFormPageState extends ConsumerState<PassageFormPage> {
   Widget build(BuildContext context) {
     final store = ref.watch(localStoreProvider);
     final days = store.daysForEvent(widget.eventId);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final cs = theme.colorScheme;
+
     final missing = widget.isEditing &&
         _loaded &&
         store.passageById(widget.passageId!) == null;
@@ -216,10 +220,12 @@ class _PassageFormPageState extends ConsumerState<PassageFormPage> {
     if (missing) {
       return Scaffold(
         appBar: AppBar(title: const Text('Editar passagem')),
-        body: const EmptyState(
-          icon: Icons.error_outline,
-          title: 'Passagem não encontrada',
-          subtitle: 'Ela pode ter sido removida ou não pertence a este evento.',
+        body: const Center(
+          child: EmptyState(
+            icon: Icons.error_outline,
+            title: 'Passagem não encontrada',
+            subtitle: 'Ela pode ter sido removida ou não pertence a este evento.',
+          ),
         ),
       );
     }
@@ -240,240 +246,549 @@ class _PassageFormPageState extends ConsumerState<PassageFormPage> {
       appBar: AppBar(
         title: Text(widget.isEditing ? 'Editar passagem' : 'Nova passagem'),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        children: [
-          TextField(
-            controller: _buyer,
-            enabled: !_saving,
-            decoration: const InputDecoration(labelText: 'Quem paga (comprador)'),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          DropdownButtonFormField<PaymentMethod>(
-            value: _method,
-            decoration: const InputDecoration(labelText: 'Forma de pagamento'),
-            items: PaymentMethod.values
-                .map((m) => DropdownMenuItem(value: m, child: Text(m.label)))
-                .toList(),
-            onChanged: _saving ? null : (v) => setState(() => _method = v ?? _method),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          if (widget.isEditing) ...[
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.md),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Histórico financeiro', style: Theme.of(context).textTheme.titleSmall),
-                    const SizedBox(height: AppSpacing.sm),
-                    Text(
-                      'Já recebido: ${AppFormatters.cents(_initialPaidCents ?? 0)}',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    if (expectedPreview != null)
-                      Text(
-                        'Valor esperado (recalculado): ${AppFormatters.cents(expectedPreview)}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: AppColors.textSecondary,
-                            ),
-                      ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Text(
-                      'O valor já recebido não é alterado aqui. Use “Registrar pagamento” na lista para novos recebimentos.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppColors.textSecondary,
-                          ),
-                    ),
-                    if (_existingReceiptNotes.isNotEmpty) ...[
-                      const SizedBox(height: AppSpacing.sm),
-                      Text('Comprovantes registrados:', style: Theme.of(context).textTheme.labelLarge),
-                      ..._existingReceiptNotes.map(
-                        (n) => Text('• $n', style: Theme.of(context).textTheme.bodySmall),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 780),
+          child: ListView(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.md,
             ),
-          ] else ...[
-            TextField(
-              controller: _paid,
-              enabled: !_saving,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Valor recebido agora (R\$)'),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _receipt,
-              enabled: !_saving,
-              decoration: const InputDecoration(
-                labelText: 'Comprovante (nota / referência)',
-                hintText: 'Ex.: PIX 14/10 Banco X — fotos no celular depois',
-              ),
-            ),
-          ],
-          const SizedBox(height: AppSpacing.xl),
-          Row(
             children: [
-              Text('Quem viaja', style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: _saving ? null : () => setState(() => _drafts.add(_Draft())),
-                icon: const Icon(Icons.person_add_outlined),
-                label: const Text('Passageiro'),
-              ),
-            ],
-          ),
-          ...List.generate(_drafts.length, (i) {
-            final d = _drafts[i];
-            final suggestions = store.suggestPeople(d.name.text);
-            return Card(
-              margin: const EdgeInsets.only(bottom: AppSpacing.md),
-              child: Padding(
+              // Seção 1: Dados do Pagador
+              Container(
                 padding: const EdgeInsets.all(AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+                  border: Border.all(
+                    color: isDark ? AppColors.borderDark : AppColors.borderLight,
+                  ),
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        Text('Passageiro ${i + 1}', style: Theme.of(context).textTheme.titleSmall),
-                        const Spacer(),
-                        if (_drafts.length > 1)
-                          IconButton(
-                            onPressed: _saving
-                                ? null
-                                : () => setState(() {
-                                      _drafts.removeAt(i).dispose();
-                                    }),
-                            icon: const Icon(Icons.delete_outline),
-                          ),
+                        const Icon(Icons.person_outline_rounded,
+                            size: 18, color: AppColors.primary),
+                        const SizedBox(width: AppSpacing.xs),
+                        Text(
+                          'Dados do Pagador',
+                          style: theme.textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
                       ],
                     ),
+                    const SizedBox(height: AppSpacing.sm),
                     TextField(
-                      controller: d.name,
+                      controller: _buyer,
                       enabled: !_saving,
-                      decoration: const InputDecoration(labelText: 'Nome completo'),
-                      onChanged: (_) => setState(() {}),
+                      decoration: const InputDecoration(
+                        labelText: 'Quem paga (comprador)',
+                        prefixIcon: Icon(Icons.badge_outlined, size: 20),
+                      ),
                     ),
-                    if (suggestions.isNotEmpty)
+                    const SizedBox(height: AppSpacing.sm),
+                    DropdownButtonFormField<PaymentMethod>(
+                      value: _method,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Forma de pagamento',
+                        prefixIcon: Icon(Icons.payment_outlined, size: 20),
+                      ),
+                      items: PaymentMethod.values
+                          .map((m) => DropdownMenuItem(
+                                value: m,
+                                child: Text(m.label),
+                              ))
+                          .toList(),
+                      onChanged: _saving ? null : (v) => setState(() => _method = v ?? _method),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: AppSpacing.md),
+
+              // Seção 2: Resumo Financeiro & Pagamentos
+              if (widget.isEditing) ...[
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+                    border: Border.all(
+                      color: isDark ? AppColors.borderDark : AppColors.borderLight,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.account_balance_wallet_outlined,
+                              size: 18, color: AppColors.primary),
+                          const SizedBox(width: AppSpacing.xs),
+                          Text(
+                            'Histórico financeiro',
+                            style: theme.textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Wrap(
+                        spacing: AppSpacing.md,
+                        runSpacing: AppSpacing.sm,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.md,
+                              vertical: AppSpacing.xs,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.success.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                              border: Border.all(
+                                color: AppColors.success.withValues(alpha: 0.2),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Já recebido',
+                                  style: theme.textTheme.labelSmall
+                                      ?.copyWith(color: AppColors.success),
+                                ),
+                                Text(
+                                  AppFormatters.cents(_initialPaidCents ?? 0),
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.success,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (expectedPreview != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.md,
+                                vertical: AppSpacing.xs,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? AppColors.surfaceElevatedDark
+                                    : AppColors.canvasLight,
+                                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                                border: Border.all(
+                                  color: isDark ? AppColors.borderDark : AppColors.borderLight,
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Valor esperado (recalculado)',
+                                    style: theme.textTheme.labelSmall
+                                        ?.copyWith(color: cs.onSurfaceVariant),
+                                  ),
+                                  Text(
+                                    AppFormatters.cents(expectedPreview),
+                                    style: theme.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
+                      Text(
+                        'O valor já recebido não é alterado aqui. Use “Registrar pagamento” na lista para novos recebimentos.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                      if (_existingReceiptNotes.isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          'Comprovantes registrados:',
+                          style: theme.textTheme.labelMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        ..._existingReceiptNotes.map(
+                          (n) => Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('• ', style: TextStyle(fontWeight: FontWeight.bold)),
+                                Expanded(
+                                  child: Text(n, style: theme.textTheme.bodySmall),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ] else ...[
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+                    border: Border.all(
+                      color: isDark ? AppColors.borderDark : AppColors.borderLight,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.monetization_on_outlined,
+                              size: 18, color: AppColors.primary),
+                          const SizedBox(width: AppSpacing.xs),
+                          Text(
+                            'Pagamento Inicial',
+                            style: theme.textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      TextField(
+                        controller: _paid,
+                        enabled: !_saving,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Valor recebido agora (R\$)',
+                          prefixIcon: Icon(Icons.attach_money_rounded, size: 20),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      TextField(
+                        controller: _receipt,
+                        enabled: !_saving,
+                        decoration: const InputDecoration(
+                          labelText: 'Comprovante (nota / referência)',
+                          hintText: 'Ex.: PIX 14/10 Banco X — fotos no celular depois',
+                          prefixIcon: Icon(Icons.receipt_long_outlined, size: 20),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: AppSpacing.md),
+
+              // Seção 3: Passageiros que Viajam
+              Row(
+                children: [
+                  const Icon(Icons.groups_outlined, size: 20, color: AppColors.primary),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(
+                    'Quem viaja',
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${_drafts.length}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  FilledButton.tonalIcon(
+                    onPressed: _saving ? null : () => setState(() => _drafts.add(_Draft())),
+                    icon: const Icon(Icons.person_add_outlined, size: 18),
+                    label: const Text('Passageiro'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.sm),
+
+              ...List.generate(_drafts.length, (i) {
+                final d = _drafts[i];
+                final suggestions = store.suggestPeople(d.name.text);
+                return Container(
+                  margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+                    border: Border.all(
+                      color: isDark ? AppColors.borderDark : AppColors.borderLight,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 26,
+                            height: 26,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withValues(alpha: 0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Text(
+                              '${i + 1}',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Text(
+                            'Passageiro ${i + 1}',
+                            style: theme.textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const Spacer(),
+                          if (_drafts.length > 1)
+                            IconButton(
+                              tooltip: 'Remover passageiro',
+                              onPressed: _saving
+                                  ? null
+                                  : () => setState(() {
+                                        _drafts.removeAt(i).dispose();
+                                      }),
+                              icon: const Icon(Icons.delete_outline, color: AppColors.error),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      TextField(
+                        controller: d.name,
+                        enabled: !_saving,
+                        decoration: const InputDecoration(
+                          labelText: 'Nome completo',
+                          prefixIcon: Icon(Icons.person_outline, size: 20),
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      if (suggestions.isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        Wrap(
+                          spacing: 8,
+                          children: suggestions
+                              .map(
+                                (p) => ActionChip(
+                                  avatar: const Icon(Icons.history_rounded, size: 16),
+                                  label: Text('Usar ${p.fullName}'),
+                                  onPressed: _saving ? null : () => _applySuggestion(i, p),
+                                ),
+                              )
+                              .toList(),
+                        ),
+                      ],
+                      const SizedBox(height: AppSpacing.sm),
+                      DropdownButtonFormField<PassengerCategory>(
+                        value: d.category,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Categoria',
+                          prefixIcon: Icon(Icons.category_outlined, size: 20),
+                        ),
+                        items: PassengerCategory.values
+                            .map((c) => DropdownMenuItem(value: c, child: Text(c.label)))
+                            .toList(),
+                        onChanged: _saving
+                            ? null
+                            : (v) => setState(() => d.category = v ?? d.category),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: DropdownButtonFormField<String>(
+                              value: d.documentType,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Tipo Doc.',
+                              ),
+                              items: const ['CPF', 'RG', 'Certidão', 'Outro']
+                                  .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                                  .toList(),
+                              onChanged: _saving
+                                  ? null
+                                  : (v) => setState(() => d.documentType = v),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Expanded(
+                            flex: 3,
+                            child: TextField(
+                              controller: d.document,
+                              enabled: !_saving,
+                              decoration: const InputDecoration(
+                                labelText: 'Número (pode ficar pendente)',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (d.category == PassengerCategory.exempt ||
+                          d.category == PassengerCategory.minor) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                            onTap: _saving
+                                ? null
+                                : () async {
+                                    final picked = await showDatePicker(
+                                      context: context,
+                                      initialDate: d.birthDate ?? DateTime(2018),
+                                      firstDate: DateTime(1990),
+                                      lastDate: DateTime.now(),
+                                    );
+                                    if (picked != null) setState(() => d.birthDate = picked);
+                                  },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.md,
+                                vertical: AppSpacing.sm,
+                              ),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                                border: Border.all(
+                                  color: isDark ? AppColors.borderDark : AppColors.borderLight,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.cake_outlined, color: AppColors.primary, size: 20),
+                                  const SizedBox(width: AppSpacing.sm),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text('Data de Nascimento', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                                        Text(
+                                          d.birthDate == null
+                                              ? 'Obrigatório para isenção'
+                                              : AppFormatters.date(d.birthDate!),
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: d.birthDate == null ? AppColors.warning : cs.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(Icons.calendar_today_outlined, size: 16),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (d.category == PassengerCategory.minor ||
+                          d.category == PassengerCategory.student) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        TextField(
+                          controller: d.responsible,
+                          enabled: !_saving,
+                          decoration: const InputDecoration(
+                            labelText: 'Responsável',
+                            prefixIcon: Icon(Icons.supervisor_account_outlined, size: 20),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        'Dias de viagem',
+                        style: theme.textTheme.labelMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
                       Wrap(
                         spacing: 8,
-                        children: suggestions
+                        children: days
                             .map(
-                              (p) => ActionChip(
-                                label: Text('Usar ${p.fullName}'),
-                                onPressed: _saving ? null : () => _applySuggestion(i, p),
+                              (day) => FilterChip(
+                                label: Text(day.label),
+                                selected: d.dayIds.contains(day.id),
+                                onSelected: _saving
+                                    ? null
+                                    : (sel) => setState(() {
+                                          if (sel) {
+                                            d.dayIds.add(day.id);
+                                          } else {
+                                            d.dayIds.remove(day.id);
+                                          }
+                                        }),
                               ),
                             )
                             .toList(),
                       ),
-                    const SizedBox(height: AppSpacing.sm),
-                    DropdownButtonFormField<PassengerCategory>(
-                      value: d.category,
-                      decoration: const InputDecoration(labelText: 'Categoria'),
-                      items: PassengerCategory.values
-                          .map((c) => DropdownMenuItem(value: c, child: Text(c.label)))
-                          .toList(),
-                      onChanged: _saving
-                          ? null
-                          : (v) => setState(() => d.category = v ?? d.category),
+                    ],
+                  ),
+                );
+              }),
+
+              const SizedBox(height: AppSpacing.md),
+
+              // Botões de ação
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _saving ? null : () => Navigator.pop(context),
+                      child: const Text('Cancelar'),
                     ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            value: d.documentType,
-                            decoration: const InputDecoration(labelText: 'Documento'),
-                            items: const ['CPF', 'RG', 'Certidão', 'Outro']
-                                .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                                .toList(),
-                            onChanged: _saving
-                                ? null
-                                : (v) => setState(() => d.documentType = v),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: d.document,
-                            enabled: !_saving,
-                            decoration: const InputDecoration(
-                              labelText: 'Número (pode ficar pendente)',
-                            ),
-                          ),
-                        ),
-                      ],
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    flex: 2,
+                    child: FilledButton(
+                      onPressed: _saving ? null : () => _save(),
+                      child: _saving
+                          ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(widget.isEditing
+                              ? 'Salvar alterações'
+                              : 'Registrar passagem'),
                     ),
-                    if (d.category == PassengerCategory.exempt ||
-                        d.category == PassengerCategory.minor)
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Nascimento'),
-                        subtitle: Text(
-                          d.birthDate == null
-                              ? 'Obrigatório para isenção'
-                              : AppFormatters.date(d.birthDate!),
-                        ),
-                        onTap: _saving
-                            ? null
-                            : () async {
-                                final picked = await showDatePicker(
-                                  context: context,
-                                  initialDate: d.birthDate ?? DateTime(2018),
-                                  firstDate: DateTime(1990),
-                                  lastDate: DateTime.now(),
-                                );
-                                if (picked != null) setState(() => d.birthDate = picked);
-                              },
-                      ),
-                    if (d.category == PassengerCategory.minor ||
-                        d.category == PassengerCategory.student)
-                      TextField(
-                        controller: d.responsible,
-                        enabled: !_saving,
-                        decoration: const InputDecoration(labelText: 'Responsável'),
-                      ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Text('Dias de viagem', style: Theme.of(context).textTheme.labelLarge),
-                    Wrap(
-                      spacing: 8,
-                      children: days
-                          .map(
-                            (day) => FilterChip(
-                              label: Text(day.label),
-                              selected: d.dayIds.contains(day.id),
-                              onSelected: _saving
-                                  ? null
-                                  : (sel) => setState(() {
-                                        if (sel) {
-                                          d.dayIds.add(day.id);
-                                        } else {
-                                          d.dayIds.remove(day.id);
-                                        }
-                                      }),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            );
-          }),
-          FilledButton(
-            onPressed: _saving ? null : () => _save(),
-            child: _saving
-                ? const SizedBox(
-                    height: 22,
-                    width: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Text(widget.isEditing ? 'Salvar alterações' : 'Registrar passagem'),
+              const SizedBox(height: AppSpacing.lg),
+            ],
           ),
-          const SizedBox(height: 32),
-        ],
+        ),
       ),
     );
   }
