@@ -132,6 +132,7 @@ class SeedData {
       paymentMethod: PaymentMethod.pix,
       receiptNotes: ['PIX Banco do Brasil 12/10'],
       createdAt: DateTime(2026, 10, 8, 10),
+      paymentRecords: [PaymentRecord(amountCents: 15000, method: PaymentMethod.pix)],
     ),
     PassageGroup(
       id: 'pass-2',
@@ -141,6 +142,7 @@ class SeedData {
       paidCents: 5000,
       paymentMethod: PaymentMethod.cash,
       createdAt: DateTime(2026, 10, 8, 11),
+      paymentRecords: [PaymentRecord(amountCents: 5000, method: PaymentMethod.cash)],
     ),
     PassageGroup(
       id: 'pass-3',
@@ -158,6 +160,7 @@ class SeedData {
       paidCents: 5000,
       paymentMethod: PaymentMethod.pix,
       createdAt: DateTime(2026, 10, 9, 15),
+      paymentRecords: [PaymentRecord(amountCents: 5000, method: PaymentMethod.pix)],
     ),
     PassageGroup(
       id: 'pass-5',

@@ -179,10 +179,18 @@ void main() {
     test('addPayment soma sem confundir com edição', () {
       final store = signedStore();
       final before = store.passageById('pass-3')!.paidCents;
-      final pay = store.addPayment(passageId: 'pass-3', extraCents: 2500, receiptNote: 'PIX extra');
+      final pay = store.addPayment(
+        passageId: 'pass-3',
+        extraCents: 2500,
+        method: PaymentMethod.pix,
+        receiptNote: 'PIX extra',
+      );
       expect(pay.ok, isTrue);
       expect(store.passageById('pass-3')!.paidCents, before + 2500);
       expect(store.passageById('pass-3')!.receiptNotes, contains('PIX extra'));
+      expect(store.passageById('pass-3')!.paymentRecords.length, 1);
+      expect(store.passageById('pass-3')!.paymentRecords.first.method, PaymentMethod.pix);
+      expect(store.passageById('pass-3')!.paymentRecords.first.amountCents, 2500);
 
       final edit = store.updatePassage(
         passageId: 'pass-3',
@@ -384,6 +392,70 @@ void main() {
       expect(store.persistenceBlocked, isFalse);
       expect(store.storageCorrupted, isFalse);
       expect(store.lastPersistError, isNull);
+    });
+  });
+
+  group('financeSummaryByMethod', () {
+    test('totais corretos com PIX e Espécie do seed', () {
+      final store = signedStore();
+      // pass-1: PIX R\$150, pass-2: Espécie R\$50, pass-3/5: sem pagamento, pass-4: PIX R\$50
+      // pass-1 tem paymentRecords=[{150,pix}], pass-2=[{50,cash}], pass-4=[{50,pix}]
+      // pass-3 e pass-5 têm paidCents=0 → não aparecem
+      final s = store.financeSummaryByMethod(SeedData.eventId);
+      expect(s.pixCents, 15000 + 5000); // pass-1 + pass-4
+      expect(s.cashCents, 5000); // pass-2
+      expect(s.unknownCents, 0); // seed novo tem paymentRecords
+      expect(s.totalCents, 25000);
+    });
+
+    test('pagamentos parciais acumulam por método', () {
+      final store = signedStore();
+      // Adiciona dois pagamentos parciais com métodos diferentes à pass-3
+      store.addPayment(
+        passageId: 'pass-3',
+        extraCents: 3000,
+        method: PaymentMethod.pix,
+        receiptNote: 'PIX parcial',
+      );
+      store.addPayment(
+        passageId: 'pass-3',
+        extraCents: 2000,
+        method: PaymentMethod.cash,
+        receiptNote: 'Espécie complemento',
+      );
+
+      final pass = store.passageById('pass-3')!;
+      expect(pass.paidCents, 5000); // soma total
+      expect(pass.paymentRecords.length, 2);
+
+      final s = store.financeSummaryByMethod(SeedData.eventId);
+      // PIX do seed (15000+5000) + 3000 da pass-3 = 23000
+      expect(s.pixCents, 15000 + 5000 + 3000);
+      // Espécie do seed (5000) + 2000 da pass-3 = 7000
+      expect(s.cashCents, 5000 + 2000);
+    });
+
+    test('passagens sem paymentRecords ficam em unknownCents', () {
+      // Simula passagem antiga: cria manualmente sem paymentRecords
+      final store = signedStore();
+      // Verifica que pass-3 do seed (paidCents=0) não inflaciona
+      // Adiciona pagamento novo com método → vai para pixCents
+      store.addPayment(
+        passageId: 'pass-3',
+        extraCents: 1000,
+        method: PaymentMethod.cash,
+      );
+      final s = store.financeSummaryByMethod(SeedData.eventId);
+      expect(s.unknownCents, 0); // Nenhuma passagem antiga sem paymentRecords
+      expect(s.cashCents, 5000 + 1000); // seed pass-2 + novo
+    });
+
+    test('evento diferente não interfere nos totais', () {
+      final store = signedStore();
+      final sA = store.financeSummaryByMethod(SeedData.eventId);
+      final sB = store.financeSummaryByMethod('evento-inexistente');
+      expect(sB.totalCents, 0);
+      expect(sA.totalCents, greaterThan(0));
     });
   });
 }

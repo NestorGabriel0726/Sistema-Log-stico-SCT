@@ -24,6 +24,7 @@ class OverviewTab extends ConsumerWidget {
     final store = ref.watch(localStoreProvider);
     final event = store.eventById(eventId)!;
     final finance = store.financeSummary(eventId);
+    final byMethod = store.financeSummaryByMethod(eventId);
     final perDay = store.passengersPerDay(eventId);
     final stats = store.vehicleDayStats(eventId);
     final activity = store.activityForEvent(eventId).take(8).toList();
@@ -79,6 +80,9 @@ class OverviewTab extends ConsumerWidget {
               ),
             ],
           ),
+          const SizedBox(height: AppSpacing.md),
+          // Detalhamento por método de pagamento
+          _FinanceByMethodCard(byMethod: byMethod, isDark: isDark, theme: theme, cs: cs),
         ] else
           Container(
             padding: const EdgeInsets.all(AppSpacing.md),
@@ -284,6 +288,186 @@ class _DeadlineStrip extends StatelessWidget {
           icon: late ? Icons.warning_amber_rounded : Icons.event_outlined,
         );
       }).toList(),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Card de resumo financeiro por método de pagamento
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _FinanceByMethodCard extends StatelessWidget {
+  final FinanceSummaryByMethod byMethod;
+  final bool isDark;
+  final ThemeData theme;
+  final ColorScheme cs;
+
+  const _FinanceByMethodCard({
+    required this.byMethod,
+    required this.isDark,
+    required this.theme,
+    required this.cs,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (byMethod.totalCents == 0) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+        border: Border.all(
+          color: isDark ? AppColors.borderDark : AppColors.borderLight,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.receipt_long_outlined,
+                  size: 16, color: AppColors.success),
+              const SizedBox(width: AppSpacing.xs),
+              Expanded(
+                child: Text(
+                  'Recebimentos por método',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.success,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          if (byMethod.pixCents > 0)
+            _MethodRow(
+              icon: Icons.qr_code_rounded,
+              label: 'PIX',
+              amount: byMethod.pixCents,
+              color: AppColors.brand,
+              theme: theme,
+              cs: cs,
+              isDark: isDark,
+            ),
+          if (byMethod.cashCents > 0)
+            _MethodRow(
+              icon: Icons.payments_outlined,
+              label: 'Espécie',
+              amount: byMethod.cashCents,
+              color: AppColors.success,
+              theme: theme,
+              cs: cs,
+              isDark: isDark,
+            ),
+          if (byMethod.unknownCents > 0)
+            _MethodRow(
+              icon: Icons.help_outline_rounded,
+              label: 'Sem método',
+              amount: byMethod.unknownCents,
+              color: cs.onSurfaceVariant,
+              theme: theme,
+              cs: cs,
+              isDark: isDark,
+              subtitle: 'Registros anteriores sem rastreamento por método',
+            ),
+          if (byMethod.hasMultipleMethods) ...[
+            Divider(
+              height: AppSpacing.md,
+              color: isDark ? AppColors.borderDark : AppColors.borderLight,
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Total recebido',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Text(
+                  AppFormatters.cents(byMethod.totalCents),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.success,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _MethodRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final int amount;
+  final Color color;
+  final ThemeData theme;
+  final ColorScheme cs;
+  final bool isDark;
+  final String? subtitle;
+
+  const _MethodRow({
+    required this.icon,
+    required this.label,
+    required this.amount,
+    required this.color,
+    required this.theme,
+    required this.cs,
+    required this.isDark,
+    this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(5),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+            ),
+            child: Icon(icon, size: 14, color: color),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style:
+                        theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                if (subtitle != null)
+                  Text(
+                    subtitle!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 10,
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Text(
+            AppFormatters.cents(amount),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1081,7 +1265,6 @@ class _PassagesTabState extends ConsumerState<PassagesTab> {
     final store = ref.watch(localStoreProvider);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final cs = theme.colorScheme;
     final canEdit = store.user?.canEditOperations == true;
 
     var groups = store.passagesForEvent(widget.eventId).where((g) {
@@ -1329,65 +1512,94 @@ class _PassagesTabState extends ConsumerState<PassagesTab> {
       BuildContext context, WidgetRef ref, PassageGroup group) async {
     final amount = TextEditingController();
     final note = TextEditingController();
+    PaymentMethod selectedMethod = PaymentMethod.pix;
+
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Pagamento — ${group.buyerName}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(AppSpacing.sm),
-              decoration: BoxDecoration(
-                color: AppColors.infoBg,
-                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline, size: 16, color: AppColors.info),
-                  const SizedBox(width: AppSpacing.sm),
-                  Text(
-                    'Já recebido: ${AppFormatters.cents(group.paidCents)}',
-                    style: Theme.of(ctx)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: AppColors.info),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final theme = Theme.of(ctx);
+          final isDark = theme.brightness == Brightness.dark;
+          return AlertDialog(
+            title: Text('Pagamento — ${group.buyerName}'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.infoBgDark : AppColors.infoBg,
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                    border: Border.all(
+                      color: AppColors.info.withValues(alpha: 0.3),
+                    ),
                   ),
-                ],
-              ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, size: 16, color: AppColors.info),
+                      const SizedBox(width: AppSpacing.sm),
+                      Text(
+                        'Já recebido: ${AppFormatters.cents(group.paidCents)}',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: AppColors.info),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextField(
+                  controller: amount,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Valor adicional (R\$)',
+                    prefixIcon: Icon(Icons.attach_money_rounded, size: 20),
+                  ),
+                  autofocus: true,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                // Seleção de método de pagamento
+                DropdownButtonFormField<PaymentMethod>(
+                  value: selectedMethod,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Forma de pagamento',
+                    prefixIcon: Icon(Icons.payment_outlined, size: 20),
+                  ),
+                  items: PaymentMethod.values
+                      .map((m) => DropdownMenuItem(
+                            value: m,
+                            child: Text(m.label),
+                          ))
+                      .toList(),
+                  onChanged: (v) =>
+                      setDialogState(() => selectedMethod = v ?? selectedMethod),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                TextField(
+                  controller: note,
+                  decoration: InputDecoration(
+                    labelText: 'Comprovante / nota',
+                    hintText: selectedMethod == PaymentMethod.pix
+                        ? 'Ex.: PIX 14/10'
+                        : 'Ex.: dinheiro entregue em maos',
+                    prefixIcon: const Icon(Icons.note_outlined, size: 20),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: amount,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Valor adicional (R\$)',
-                prefixIcon: Icon(Icons.attach_money_rounded, size: 20),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancelar')),
+              FilledButton.icon(
+                onPressed: () => Navigator.pop(ctx, true),
+                icon: const Icon(Icons.check_rounded, size: 16),
+                label: const Text('Registrar'),
               ),
-              autofocus: true,
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            TextField(
-              controller: note,
-              decoration: const InputDecoration(
-                labelText: 'Comprovante / nota',
-                hintText: 'Ex.: PIX 14/10',
-                prefixIcon: Icon(Icons.note_outlined, size: 20),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          FilledButton.icon(
-            onPressed: () => Navigator.pop(ctx, true),
-            icon: const Icon(Icons.check_rounded, size: 16),
-            label: const Text('Registrar'),
-          ),
-        ],
+            ],
+          );
+        },
       ),
     );
     if (ok != true || !context.mounted) return;
@@ -1396,6 +1608,7 @@ class _PassagesTabState extends ConsumerState<PassagesTab> {
     final result = store.addPayment(
       passageId: group.id,
       extraCents: (reais * 100).round(),
+      method: selectedMethod,
       receiptNote: note.text,
     );
     if (context.mounted) await showStoreMessage(context, result);

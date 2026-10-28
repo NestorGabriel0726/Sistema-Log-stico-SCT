@@ -364,6 +364,37 @@ class LocalAppStore extends ChangeNotifier {
     return FinanceSummary(expectedCents: expected, paidCents: paid);
   }
 
+  /// Calcula os recebimentos separados por método de pagamento.
+  ///
+  /// - [pixCents]: soma dos [PaymentRecord] com método PIX.
+  /// - [cashCents]: soma dos [PaymentRecord] com método Espécie.
+  /// - [unknownCents]: `paidCents` de passagens sem nenhum [PaymentRecord]
+  ///   (registros anteriores à funcionalidade de rastreamento por método).
+  FinanceSummaryByMethod financeSummaryByMethod(String eventId) {
+    var pix = 0;
+    var cash = 0;
+    var unknown = 0;
+    for (final g in _passages.where((p) => p.eventId == eventId)) {
+      if (g.paymentRecords.isEmpty) {
+        // Passagem antiga — contabiliza paidCents sem método rastreado.
+        unknown += g.paidCents;
+      } else {
+        for (final r in g.paymentRecords) {
+          if (r.method == PaymentMethod.pix) {
+            pix += r.amountCents;
+          } else {
+            cash += r.amountCents;
+          }
+        }
+      }
+    }
+    return FinanceSummaryByMethod(
+      pixCents: pix,
+      cashCents: cash,
+      unknownCents: unknown,
+    );
+  }
+
   List<ActivityEntry> activityForEvent(String eventId) =>
       _activity.where((a) => a.eventId == eventId).toList()
         ..sort((a, b) => b.at.compareTo(a.at));
@@ -668,6 +699,9 @@ class LocalAppStore extends ChangeNotifier {
         receiptNotes: receiptNotes,
         createdAt: DateTime.now(),
         deadlineBypass: event.passageDeadlinePassed,
+        paymentRecords: paidCents > 0
+            ? [PaymentRecord(amountCents: paidCents, method: method)]
+            : const [],
       ),
     );
     _log(
@@ -798,6 +832,7 @@ class LocalAppStore extends ChangeNotifier {
   StoreResult addPayment({
     required String passageId,
     required int extraCents,
+    required PaymentMethod method,
     String? receiptNote,
   }) {
     if (!_canEdit()) return const StoreResult.error('Sem permissão.');
@@ -809,11 +844,16 @@ class LocalAppStore extends ChangeNotifier {
     if (receiptNote != null && receiptNote.trim().isNotEmpty) {
       notes.add(receiptNote.trim());
     }
+    final records = [
+      ...current.paymentRecords,
+      PaymentRecord(amountCents: extraCents, method: method),
+    ];
     _passages[i] = current.copyWith(
       paidCents: current.paidCents + extraCents,
       receiptNotes: notes,
+      paymentRecords: records,
     );
-    _log(current.eventId, 'Pagamento extra em ${current.buyerName}.');
+    _log(current.eventId, 'Pagamento extra em ${current.buyerName} (${method.label}).');
     _changed();
     return const StoreResult.ok();
   }

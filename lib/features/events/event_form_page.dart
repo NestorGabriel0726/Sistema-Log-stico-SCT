@@ -108,7 +108,6 @@ class _EventFormPageState extends ConsumerState<EventFormPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final cs = theme.colorScheme;
     final isEdit = widget.existing != null;
 
     return Scaffold(

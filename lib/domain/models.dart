@@ -57,6 +57,28 @@ extension PaymentMethodLabel on PaymentMethod {
   String get label => this == PaymentMethod.pix ? 'PIX' : 'Espécie';
 }
 
+/// Registro individual de um recebimento, com valor e método.
+@immutable
+class PaymentRecord {
+  final int amountCents;
+  final PaymentMethod method;
+
+  const PaymentRecord({required this.amountCents, required this.method});
+
+  Map<String, dynamic> toJson() => {
+        'amountCents': amountCents,
+        'method': method.name,
+      };
+
+  factory PaymentRecord.fromJson(Map<String, dynamic> json) => PaymentRecord(
+        amountCents: (json['amountCents'] as num?)?.toInt() ?? 0,
+        method: PaymentMethod.values.firstWhere(
+          (m) => m.name == json['method'],
+          orElse: () => PaymentMethod.pix,
+        ),
+      );
+}
+
 enum FinancialStatus { unpaid, partial, paid, overpaid, notApplicable }
 
 extension FinancialStatusLabel on FinancialStatus {
@@ -553,6 +575,10 @@ class PassageGroup {
   final List<String> receiptNotes;
   final DateTime createdAt;
   final bool deadlineBypass;
+  /// Registros individuais de recebimento (valor + método).
+  /// Quando vazio, o recebimento foi registrado antes da funcionalidade de rastreamento
+  /// por método e `paidCents` é a fonte de verdade sem método conhecido.
+  final List<PaymentRecord> paymentRecords;
 
   const PassageGroup({
     required this.id,
@@ -564,6 +590,7 @@ class PassageGroup {
     this.receiptNotes = const [],
     required this.createdAt,
     this.deadlineBypass = false,
+    this.paymentRecords = const [],
   });
 
   PassageGroup copyWith({
@@ -573,6 +600,7 @@ class PassageGroup {
     PaymentMethod? paymentMethod,
     List<String>? receiptNotes,
     bool? deadlineBypass,
+    List<PaymentRecord>? paymentRecords,
   }) {
     return PassageGroup(
       id: id,
@@ -584,6 +612,7 @@ class PassageGroup {
       receiptNotes: receiptNotes ?? this.receiptNotes,
       createdAt: createdAt,
       deadlineBypass: deadlineBypass ?? this.deadlineBypass,
+      paymentRecords: paymentRecords ?? this.paymentRecords,
     );
   }
 
@@ -597,6 +626,7 @@ class PassageGroup {
         'receiptNotes': receiptNotes,
         'createdAt': createdAt.toIso8601String(),
         'deadlineBypass': deadlineBypass,
+        'paymentRecords': paymentRecords.map((r) => r.toJson()).toList(),
       };
 
   factory PassageGroup.fromJson(Map<String, dynamic> json) => PassageGroup(
@@ -612,6 +642,11 @@ class PassageGroup {
         receiptNotes: (json['receiptNotes'] as List?)?.whereType<String>().toList() ?? const [],
         createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
         deadlineBypass: json['deadlineBypass'] as bool? ?? false,
+        paymentRecords: (json['paymentRecords'] as List?)
+                ?.whereType<Map<String, dynamic>>()
+                .map(PaymentRecord.fromJson)
+                .toList() ??
+            const [],
       );
 }
 
@@ -653,6 +688,26 @@ class FinanceSummary {
   const FinanceSummary({required this.expectedCents, required this.paidCents});
 
   int get pendingCents => (expectedCents - paidCents).clamp(0, expectedCents);
+}
+
+/// Resumo financeiro detalhado por método de pagamento.
+@immutable
+class FinanceSummaryByMethod {
+  final int pixCents;
+  final int cashCents;
+  /// Recebimentos sem método rastreado (passagens antigas ou criadas sem registro individual).
+  final int unknownCents;
+
+  const FinanceSummaryByMethod({
+    required this.pixCents,
+    required this.cashCents,
+    required this.unknownCents,
+  });
+
+  int get totalCents => pixCents + cashCents + unknownCents;
+  bool get hasUnknown => unknownCents > 0;
+  bool get hasMultipleMethods =>
+      (pixCents > 0 ? 1 : 0) + (cashCents > 0 ? 1 : 0) + (unknownCents > 0 ? 1 : 0) > 1;
 }
 
 @immutable
