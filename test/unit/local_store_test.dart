@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:transport_logistics/data/local_app_store.dart';
@@ -279,6 +281,108 @@ void main() {
       // Próxima gravação bem-sucedida limpa o estado.
       store.signIn(name: 'Carlos', role: UserRole.coordinator);
       await store.flushPersist();
+      expect(store.lastPersistError, isNull);
+    });
+
+    test('JSON corrompido no storage bloqueia sobrescrita e preserva arquivo original e backup', () async {
+      SharedPreferences.setMockInitialValues({
+        'sct_local_state_v2': '{este json esta completamente corrompido!!!',
+      });
+      final store = LocalAppStore();
+      await store.hydrate();
+
+      expect(store.storageCorrupted, isTrue);
+      expect(store.persistenceBlocked, isTrue);
+      expect(store.lastPersistError, contains('bloqueada'));
+      expect(store.loadErrors, isNotEmpty);
+      expect(store.listEvents(), isEmpty); // Não mascara com SeedData
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('sct_local_state_v2_backup'), '{este json esta completamente corrompido!!!');
+
+      // Tenta alterar dados (ex: login ou edição) — a gravação deve ser bloqueada
+      store.signIn(name: 'Tentativa De Login', role: UserRole.coordinator);
+      await store.flushPersist();
+
+      expect(store.lastPersistError, contains('bloqueada'));
+      // O dado no SharedPreferences NÃO foi sobrescrito!
+      expect(prefs.getString('sct_local_state_v2'), '{este json esta completamente corrompido!!!');
+    });
+
+    test('JSON com campos ausentes ou nulos recupera com segurança sem descartar dados', () async {
+      SharedPreferences.setMockInitialValues({
+        'sct_local_state_v2': jsonEncode({
+          'events': [
+            {
+              'id': 'ev-recuperado',
+              'theme': 'Evento Parcial Recuperado',
+            }
+          ],
+          'passengers': [
+            {
+              'id': 'p-rec',
+              'eventId': 'ev-recuperado',
+              'name': 'Passageiro Sem Categoria',
+            }
+          ],
+        }),
+      });
+      final store = LocalAppStore();
+      await store.hydrate();
+
+      expect(store.eventById('ev-recuperado')?.theme, 'Evento Parcial Recuperado');
+      final p = store.passengerById('p-rec');
+      expect(p, isNotNull);
+      expect(p!.name, 'Passageiro Sem Categoria');
+      expect(p.category, PassengerCategory.adult); // Fallback seguro
+      expect(p.dayIds, isEmpty); // Fallback seguro
+      expect(store.persistenceBlocked, isFalse);
+    });
+
+    test('item inválido na lista registra erro explícito e bloqueia gravação contra perda silenciosa', () async {
+      SharedPreferences.setMockInitialValues({
+        'sct_local_state_v2': jsonEncode({
+          'events': 'isso nao e uma lista de eventos',
+        }),
+      });
+      final store = LocalAppStore();
+      await store.hydrate();
+
+      expect(store.storageCorrupted, isTrue);
+      expect(store.persistenceBlocked, isTrue);
+      expect(store.loadErrors, isNotEmpty);
+      expect(store.loadErrors.any((e) => e.contains('events')), isTrue);
+      expect(store.lastPersistError, contains('bloqueada'));
+    });
+
+    test('resetDemo desbloqueia persistência e re-aplica seed', () async {
+      SharedPreferences.setMockInitialValues({
+        'sct_local_state_v2': '{corrompido}',
+      });
+      final store = LocalAppStore();
+      await store.hydrate();
+      expect(store.persistenceBlocked, isTrue);
+
+      await store.resetDemo();
+      expect(store.persistenceBlocked, isFalse);
+      expect(store.storageCorrupted, isFalse);
+      expect(store.listEvents().single.id, SeedData.eventId);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('sct_local_state_v2'), isNot('{corrompido}'));
+    });
+
+    test('unblockPersistence limpa bloqueio de gravação', () async {
+      SharedPreferences.setMockInitialValues({
+        'sct_local_state_v2': '{corrompido}',
+      });
+      final store = LocalAppStore();
+      await store.hydrate();
+      expect(store.persistenceBlocked, isTrue);
+
+      store.unblockPersistence();
+      expect(store.persistenceBlocked, isFalse);
+      expect(store.storageCorrupted, isFalse);
       expect(store.lastPersistError, isNull);
     });
   });

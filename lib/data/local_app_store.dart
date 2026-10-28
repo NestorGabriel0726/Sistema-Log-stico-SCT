@@ -11,6 +11,7 @@ import 'seed_data.dart';
 
 class LocalAppStore extends ChangeNotifier {
   static const _prefsKey = 'sct_local_state_v2';
+  static const _prefsBackupKey = 'sct_local_state_v2_backup';
   final _uuid = const Uuid();
 
   AppUser? _user;
@@ -25,6 +26,9 @@ class LocalAppStore extends ChangeNotifier {
   List<ActivityEntry> _activity = [];
   bool _hydrated = false;
   String? _lastPersistError;
+  bool _persistenceBlocked = false;
+  bool _storageCorrupted = false;
+  final List<String> _loadErrors = [];
   Future<void> _persistChain = Future<void>.value();
 
   /// Quando true, a próxima gravação falha de propósito (somente testes).
@@ -38,9 +42,21 @@ class LocalAppStore extends ChangeNotifier {
   AppUser? get user => _user;
   bool get hydrated => _hydrated;
   String? get lastPersistError => _lastPersistError;
+  bool get persistenceBlocked => _persistenceBlocked;
+  bool get storageCorrupted => _storageCorrupted;
+  List<String> get loadErrors => List.unmodifiable(_loadErrors);
 
   void clearPersistError() {
     if (_lastPersistError == null) return;
+    _lastPersistError = null;
+    notifyListeners();
+  }
+
+  /// Desbloqueia explicitamente a persistência (por decisão intencional do operador).
+  void unblockPersistence() {
+    _persistenceBlocked = false;
+    _storageCorrupted = false;
+    _loadErrors.clear();
     _lastPersistError = null;
     notifyListeners();
   }
@@ -57,17 +73,79 @@ class LocalAppStore extends ChangeNotifier {
     _activity = List.from(SeedData.activities);
   }
 
+  void _clearState() {
+    _user = null;
+    _events = [];
+    _days = [];
+    _vehicles = [];
+    _passengers = [];
+    _allocations = [];
+    _passages = [];
+    _checkIns = [];
+    _people = [];
+    _activity = [];
+  }
+
   Future<void> hydrate() async {
+    _loadErrors.clear();
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_prefsKey);
       if (raw != null) {
-        _fromMap(jsonDecode(raw) as Map<String, dynamic>);
-        _lastPersistError = null;
+        dynamic decoded;
+        try {
+          decoded = jsonDecode(raw);
+        } catch (e, st) {
+          debugPrint('LocalAppStore.hydrate: JSON corrompido: $e\n$st');
+          _storageCorrupted = true;
+          _persistenceBlocked = true;
+          _loadErrors.add('JSON corrompido: $e');
+          await prefs.setString(_prefsBackupKey, raw);
+          _clearState();
+          _lastPersistError =
+              'Falha ao ler dados salvos (JSON corrompido). '
+              'A gravação automática foi bloqueada para proteger o arquivo salvo.';
+          _hydrated = true;
+          notifyListeners();
+          return;
+        }
+
+        if (decoded is! Map<String, dynamic>) {
+          _storageCorrupted = true;
+          _persistenceBlocked = true;
+          _loadErrors.add('Estrutura inválida: raiz do JSON não é um objeto');
+          await prefs.setString(_prefsBackupKey, raw);
+          _clearState();
+          _lastPersistError =
+              'Formato de dados incompatível. A gravação foi bloqueada para proteger o arquivo salvo.';
+          _hydrated = true;
+          notifyListeners();
+          return;
+        }
+
+        final errors = _fromMap(decoded);
+        if (errors.isNotEmpty) {
+          _loadErrors.addAll(errors);
+          _storageCorrupted = true;
+          _persistenceBlocked = true;
+          await prefs.setString(_prefsBackupKey, raw);
+          _lastPersistError =
+              'Atenção: foram encontrados dados corrompidos no arquivo salvo. '
+              'A gravação foi bloqueada para evitar descarte silencioso de registros.';
+        } else {
+          _storageCorrupted = false;
+          _persistenceBlocked = false;
+          _lastPersistError = null;
+        }
       }
     } catch (e, st) {
       debugPrint('LocalAppStore.hydrate falhou: $e\n$st');
-      _lastPersistError = 'Não foi possível carregar os dados salvos neste aparelho.';
+      _storageCorrupted = true;
+      _persistenceBlocked = true;
+      _loadErrors.add('Falha inesperada no hydrate: $e');
+      _lastPersistError =
+          'Não foi possível carregar os dados salvos neste aparelho. '
+          'A gravação foi bloqueada para segurança.';
     }
     _hydrated = true;
     notifyListeners();
@@ -77,6 +155,11 @@ class LocalAppStore extends ChangeNotifier {
   Future<void> flushPersist() => _persistChain;
 
   Future<void> _persist() async {
+    if (_persistenceBlocked) {
+      throw StateError(
+        'Gravação em disco bloqueada para proteger dados salvos que falharam ao carregar.',
+      );
+    }
     if (failNextPersist) {
       failNextPersist = false;
       throw StateError('Falha simulada de persistência');
@@ -96,14 +179,19 @@ class LocalAppStore extends ChangeNotifier {
         }
       } catch (e, st) {
         debugPrint('LocalAppStore.persist falhou: $e\n$st');
-        _lastPersistError =
-            'Não foi possível salvar as alterações neste aparelho. Tente de novo.';
+        _lastPersistError = _persistenceBlocked
+            ? 'Gravação bloqueada: dados corrompidos detectados no aparelho.'
+            : 'Não foi possível salvar as alterações neste aparelho. Tente de novo.';
         notifyListeners();
       }
     });
   }
 
   Future<void> resetDemo() async {
+    _persistenceBlocked = false;
+    _storageCorrupted = false;
+    _loadErrors.clear();
+    _lastPersistError = null;
     applySeed();
     _changed();
     await flushPersist();
@@ -1010,23 +1098,194 @@ class LocalAppStore extends ChangeNotifier {
         'activity': _activity.map((e) => e.toJson()).toList(),
       };
 
-  void _fromMap(Map<String, dynamic> map) {
-    _user = map['user'] != null ? AppUser.fromJson(map['user'] as Map<String, dynamic>) : null;
-    _events = (map['events'] as List).map((e) => TransportEvent.fromJson(e as Map<String, dynamic>)).toList();
-    _days = (map['days'] as List).map((e) => EventDay.fromJson(e as Map<String, dynamic>)).toList();
-    _vehicles = (map['vehicles'] as List).map((e) => Vehicle.fromJson(e as Map<String, dynamic>)).toList();
-    _passengers = (map['passengers'] as List).map((e) => Passenger.fromJson(e as Map<String, dynamic>)).toList();
-    _allocations = (map['allocations'] as List).map((e) => Allocation.fromJson(e as Map<String, dynamic>)).toList();
-    _passages = (map['passages'] as List).map((e) => PassageGroup.fromJson(e as Map<String, dynamic>)).toList();
-    _checkIns = (map['checkIns'] as List? ?? [])
-        .map((e) => CheckInRecord.fromJson(e as Map<String, dynamic>))
-        .toList();
-    _people = (map['people'] as List? ?? [])
-        .map((e) => PersonMemory.fromJson(e as Map<String, dynamic>))
-        .toList();
-    _activity = (map['activity'] as List? ?? [])
-        .map((e) => ActivityEntry.fromJson(e as Map<String, dynamic>))
-        .toList();
+  List<String> _fromMap(Map<String, dynamic> map) {
+    final errors = <String>[];
+
+    AppUser? parsedUser;
+    final userRaw = map['user'];
+    if (userRaw != null) {
+      if (userRaw is Map<String, dynamic>) {
+        try {
+          parsedUser = AppUser.fromJson(userRaw);
+        } catch (e) {
+          errors.add('Falha ao ler usuário: $e');
+        }
+      } else {
+        errors.add('Campo "user" com formato inválido');
+      }
+    }
+
+    final parsedEvents = <TransportEvent>[];
+    final eventsRaw = map['events'];
+    if (eventsRaw is List) {
+      for (var i = 0; i < eventsRaw.length; i++) {
+        final item = eventsRaw[i];
+        if (item is Map<String, dynamic>) {
+          try {
+            parsedEvents.add(TransportEvent.fromJson(item));
+          } catch (e) {
+            errors.add('Evento no índice $i inválido: $e');
+          }
+        } else {
+          errors.add('Evento no índice $i não é um objeto válido');
+        }
+      }
+    } else if (eventsRaw != null) {
+      errors.add('Campo "events" deve ser uma lista');
+    }
+
+    final parsedDays = <EventDay>[];
+    final daysRaw = map['days'];
+    if (daysRaw is List) {
+      for (var i = 0; i < daysRaw.length; i++) {
+        final item = daysRaw[i];
+        if (item is Map<String, dynamic>) {
+          try {
+            parsedDays.add(EventDay.fromJson(item));
+          } catch (e) {
+            errors.add('Dia no índice $i inválido: $e');
+          }
+        } else {
+          errors.add('Dia no índice $i não é um objeto válido');
+        }
+      }
+    } else if (daysRaw != null) {
+      errors.add('Campo "days" deve ser uma lista');
+    }
+
+    final parsedVehicles = <Vehicle>[];
+    final vehiclesRaw = map['vehicles'];
+    if (vehiclesRaw is List) {
+      for (var i = 0; i < vehiclesRaw.length; i++) {
+        final item = vehiclesRaw[i];
+        if (item is Map<String, dynamic>) {
+          try {
+            parsedVehicles.add(Vehicle.fromJson(item));
+          } catch (e) {
+            errors.add('Veículo no índice $i inválido: $e');
+          }
+        } else {
+          errors.add('Veículo no índice $i não é um objeto válido');
+        }
+      }
+    } else if (vehiclesRaw != null) {
+      errors.add('Campo "vehicles" deve ser uma lista');
+    }
+
+    final parsedPassengers = <Passenger>[];
+    final passengersRaw = map['passengers'];
+    if (passengersRaw is List) {
+      for (var i = 0; i < passengersRaw.length; i++) {
+        final item = passengersRaw[i];
+        if (item is Map<String, dynamic>) {
+          try {
+            parsedPassengers.add(Passenger.fromJson(item));
+          } catch (e) {
+            errors.add('Passageiro no índice $i inválido: $e');
+          }
+        } else {
+          errors.add('Passageiro no índice $i não é um objeto válido');
+        }
+      }
+    } else if (passengersRaw != null) {
+      errors.add('Campo "passengers" deve ser uma lista');
+    }
+
+    final parsedAllocations = <Allocation>[];
+    final allocationsRaw = map['allocations'];
+    if (allocationsRaw is List) {
+      for (var i = 0; i < allocationsRaw.length; i++) {
+        final item = allocationsRaw[i];
+        if (item is Map<String, dynamic>) {
+          try {
+            parsedAllocations.add(Allocation.fromJson(item));
+          } catch (e) {
+            errors.add('Alocação no índice $i inválida: $e');
+          }
+        } else {
+          errors.add('Alocação no índice $i não é um objeto válido');
+        }
+      }
+    } else if (allocationsRaw != null) {
+      errors.add('Campo "allocations" deve ser uma lista');
+    }
+
+    final parsedPassages = <PassageGroup>[];
+    final passagesRaw = map['passages'];
+    if (passagesRaw is List) {
+      for (var i = 0; i < passagesRaw.length; i++) {
+        final item = passagesRaw[i];
+        if (item is Map<String, dynamic>) {
+          try {
+            parsedPassages.add(PassageGroup.fromJson(item));
+          } catch (e) {
+            errors.add('Passagem no índice $i inválida: $e');
+          }
+        } else {
+          errors.add('Passagem no índice $i não é um objeto válido');
+        }
+      }
+    } else if (passagesRaw != null) {
+      errors.add('Campo "passages" deve ser uma lista');
+    }
+
+    final parsedCheckIns = <CheckInRecord>[];
+    final checkInsRaw = map['checkIns'];
+    if (checkInsRaw is List) {
+      for (var i = 0; i < checkInsRaw.length; i++) {
+        final item = checkInsRaw[i];
+        if (item is Map<String, dynamic>) {
+          try {
+            parsedCheckIns.add(CheckInRecord.fromJson(item));
+          } catch (e) {
+            errors.add('Check-in no índice $i inválido: $e');
+          }
+        }
+      }
+    }
+
+    final parsedPeople = <PersonMemory>[];
+    final peopleRaw = map['people'];
+    if (peopleRaw is List) {
+      for (var i = 0; i < peopleRaw.length; i++) {
+        final item = peopleRaw[i];
+        if (item is Map<String, dynamic>) {
+          try {
+            parsedPeople.add(PersonMemory.fromJson(item));
+          } catch (e) {
+            errors.add('Pessoa no índice $i inválida: $e');
+          }
+        }
+      }
+    }
+
+    final parsedActivity = <ActivityEntry>[];
+    final activityRaw = map['activity'];
+    if (activityRaw is List) {
+      for (var i = 0; i < activityRaw.length; i++) {
+        final item = activityRaw[i];
+        if (item is Map<String, dynamic>) {
+          try {
+            parsedActivity.add(ActivityEntry.fromJson(item));
+          } catch (e) {
+            errors.add('Histórico no índice $i inválido: $e');
+          }
+        }
+      }
+    }
+
+    _user = parsedUser;
+    _events = parsedEvents;
+    _days = parsedDays;
+    _vehicles = parsedVehicles;
+    _passengers = parsedPassengers;
+    _allocations = parsedAllocations;
+    _passages = parsedPassages;
+    _checkIns = parsedCheckIns;
+    _people = parsedPeople;
+    _activity = parsedActivity;
+
+    return errors;
   }
 }
 

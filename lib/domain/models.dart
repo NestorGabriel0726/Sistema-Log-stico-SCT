@@ -110,10 +110,13 @@ class AppUser {
       };
 
   factory AppUser.fromJson(Map<String, dynamic> json) => AppUser(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        email: json['email'] as String,
-        role: UserRole.values.byName(json['role'] as String),
+        id: json['id'] as String? ?? 'local-user',
+        name: json['name'] as String? ?? '',
+        email: json['email'] as String? ?? '',
+        role: UserRole.values.firstWhere(
+          (r) => r.name == json['role'],
+          orElse: () => UserRole.coordinator,
+        ),
         assignedVehicleId: json['assignedVehicleId'] as String?,
       );
 }
@@ -210,22 +213,28 @@ class TransportEvent {
       };
 
   factory TransportEvent.fromJson(Map<String, dynamic> json) => TransportEvent(
-        id: json['id'] as String,
-        theme: json['theme'] as String,
-        kind: EventKind.values.byName(json['kind'] as String),
-        lifecycle: EventLifecycle.values.byName(json['lifecycle'] as String),
-        startDate: DateTime.parse(json['startDate'] as String),
-        endDate: DateTime.parse(json['endDate'] as String),
-        dailyFareCents: json['dailyFareCents'] as int,
-        minimumPayingAge: json['minimumPayingAge'] as int? ?? 6,
+        id: json['id'] as String? ?? '',
+        theme: json['theme'] as String? ?? 'Evento sem tema',
+        kind: EventKind.values.firstWhere(
+          (k) => k.name == json['kind'],
+          orElse: () => EventKind.other,
+        ),
+        lifecycle: EventLifecycle.values.firstWhere(
+          (l) => l.name == json['lifecycle'],
+          orElse: () => EventLifecycle.open,
+        ),
+        startDate: DateTime.tryParse(json['startDate'] as String? ?? '') ?? DateTime.now(),
+        endDate: DateTime.tryParse(json['endDate'] as String? ?? '') ?? DateTime.now(),
+        dailyFareCents: (json['dailyFareCents'] as num?)?.toInt() ?? 0,
+        minimumPayingAge: (json['minimumPayingAge'] as num?)?.toInt() ?? 6,
         passageDeadline: json['passageDeadline'] != null
-            ? DateTime.parse(json['passageDeadline'] as String)
+            ? DateTime.tryParse(json['passageDeadline'] as String)
             : null,
         preliminaryListDeadline: json['preliminaryListDeadline'] != null
-            ? DateTime.parse(json['preliminaryListDeadline'] as String)
+            ? DateTime.tryParse(json['preliminaryListDeadline'] as String)
             : null,
         finalListDeadline: json['finalListDeadline'] != null
-            ? DateTime.parse(json['finalListDeadline'] as String)
+            ? DateTime.tryParse(json['finalListDeadline'] as String)
             : null,
         captainCheckinEnabled: json['captainCheckinEnabled'] as bool? ?? true,
         helperCheckinEnabled: json['helperCheckinEnabled'] as bool? ?? false,
@@ -254,10 +263,10 @@ class EventDay {
       };
 
   factory EventDay.fromJson(Map<String, dynamic> json) => EventDay(
-        id: json['id'] as String,
-        eventId: json['eventId'] as String,
-        date: DateTime.parse(json['date'] as String),
-        label: json['label'] as String,
+        id: json['id'] as String? ?? '',
+        eventId: json['eventId'] as String? ?? '',
+        date: DateTime.tryParse(json['date'] as String? ?? '') ?? DateTime.now(),
+        label: json['label'] as String? ?? '',
       );
 }
 
@@ -291,12 +300,19 @@ class Vehicle {
       };
 
   factory Vehicle.fromJson(Map<String, dynamic> json) => Vehicle(
-        id: json['id'] as String,
-        eventId: json['eventId'] as String,
-        name: json['name'] as String,
-        type: VehicleType.values.byName(json['type'] as String? ?? 'bus'),
-        physicalCapacity: json['physicalCapacity'] as int? ?? json['capacity'] as int? ?? 0,
-        localCapacity: json['localCapacity'] as int? ?? json['capacity'] as int? ?? 0,
+        id: json['id'] as String? ?? '',
+        eventId: json['eventId'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        type: VehicleType.values.firstWhere(
+          (t) => t.name == json['type'],
+          orElse: () => VehicleType.bus,
+        ),
+        physicalCapacity: (json['physicalCapacity'] as num?)?.toInt() ??
+            (json['capacity'] as num?)?.toInt() ??
+            0,
+        localCapacity: (json['localCapacity'] as num?)?.toInt() ??
+            (json['capacity'] as num?)?.toInt() ??
+            0,
       );
 }
 
@@ -325,11 +341,11 @@ class PersonMemory {
       };
 
   factory PersonMemory.fromJson(Map<String, dynamic> json) => PersonMemory(
-        fullName: json['fullName'] as String,
+        fullName: json['fullName'] as String? ?? '',
         documentType: json['documentType'] as String?,
         documentNumber: json['documentNumber'] as String?,
         birthDate: json['birthDate'] != null
-            ? DateTime.parse(json['birthDate'] as String)
+            ? DateTime.tryParse(json['birthDate'] as String)
             : null,
         responsibleName: json['responsibleName'] as String?,
       );
@@ -408,18 +424,21 @@ class Passenger {
       };
 
   factory Passenger.fromJson(Map<String, dynamic> json) => Passenger(
-        id: json['id'] as String,
-        eventId: json['eventId'] as String,
+        id: json['id'] as String? ?? '',
+        eventId: json['eventId'] as String? ?? '',
         passageId: json['passageId'] as String? ?? '',
-        name: json['name'] as String,
+        name: json['name'] as String? ?? '',
         documentType: json['documentType'] as String?,
         documentNumber: json['documentNumber'] as String?,
         birthDate: json['birthDate'] != null
-            ? DateTime.parse(json['birthDate'] as String)
+            ? DateTime.tryParse(json['birthDate'] as String)
             : null,
-        category: PassengerCategory.values.byName(json['category'] as String? ?? 'adult'),
+        category: PassengerCategory.values.firstWhere(
+          (c) => c.name == json['category'],
+          orElse: () => PassengerCategory.adult,
+        ),
         responsibleName: json['responsibleName'] as String?,
-        dayIds: (json['dayIds'] as List).cast<String>(),
+        dayIds: (json['dayIds'] as List?)?.whereType<String>().toList() ?? const [],
       );
 }
 
@@ -483,12 +502,15 @@ class Allocation {
       };
 
   factory Allocation.fromJson(Map<String, dynamic> json) => Allocation(
-        id: json['id'] as String,
-        passengerId: json['passengerId'] as String,
-        vehicleId: json['vehicleId'] as String,
-        dayId: json['dayId'] as String,
-        position: json['position'] as int,
-        status: AllocationStatus.values.byName(json['status'] as String? ?? 'active'),
+        id: json['id'] as String? ?? '',
+        passengerId: json['passengerId'] as String? ?? '',
+        vehicleId: json['vehicleId'] as String? ?? '',
+        dayId: json['dayId'] as String? ?? '',
+        position: (json['position'] as num?)?.toInt() ?? 0,
+        status: AllocationStatus.values.firstWhere(
+          (s) => s.name == json['status'],
+          orElse: () => AllocationStatus.active,
+        ),
         relocatedToVehicleId: json['relocatedToVehicleId'] as String?,
         substitutePassengerId: json['substitutePassengerId'] as String?,
         replacedPassengerId: json['replacedPassengerId'] as String?,
@@ -514,9 +536,9 @@ class CheckInRecord {
       };
 
   factory CheckInRecord.fromJson(Map<String, dynamic> json) => CheckInRecord(
-        allocationId: json['allocationId'] as String,
-        direction: json['direction'] as String,
-        at: DateTime.parse(json['at'] as String),
+        allocationId: json['allocationId'] as String? ?? '',
+        direction: json['direction'] as String? ?? 'OUTBOUND',
+        at: DateTime.tryParse(json['at'] as String? ?? '') ?? DateTime.now(),
       );
 }
 
@@ -578,14 +600,17 @@ class PassageGroup {
       };
 
   factory PassageGroup.fromJson(Map<String, dynamic> json) => PassageGroup(
-        id: json['id'] as String,
-        eventId: json['eventId'] as String,
-        buyerName: json['buyerName'] as String,
-        passengerIds: (json['passengerIds'] as List).cast<String>(),
-        paidCents: json['paidCents'] as int,
-        paymentMethod: PaymentMethod.values.byName(json['paymentMethod'] as String? ?? 'pix'),
-        receiptNotes: (json['receiptNotes'] as List?)?.cast<String>() ?? const [],
-        createdAt: DateTime.parse(json['createdAt'] as String),
+        id: json['id'] as String? ?? '',
+        eventId: json['eventId'] as String? ?? '',
+        buyerName: json['buyerName'] as String? ?? '',
+        passengerIds: (json['passengerIds'] as List?)?.whereType<String>().toList() ?? const [],
+        paidCents: (json['paidCents'] as num?)?.toInt() ?? 0,
+        paymentMethod: PaymentMethod.values.firstWhere(
+          (m) => m.name == json['paymentMethod'],
+          orElse: () => PaymentMethod.pix,
+        ),
+        receiptNotes: (json['receiptNotes'] as List?)?.whereType<String>().toList() ?? const [],
+        createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
         deadlineBypass: json['deadlineBypass'] as bool? ?? false,
       );
 }
@@ -655,11 +680,11 @@ class ActivityEntry {
       };
 
   factory ActivityEntry.fromJson(Map<String, dynamic> json) => ActivityEntry(
-        id: json['id'] as String,
-        eventId: json['eventId'] as String,
-        message: json['message'] as String,
-        at: DateTime.parse(json['at'] as String),
-        actorName: json['actorName'] as String,
+        id: json['id'] as String? ?? '',
+        eventId: json['eventId'] as String? ?? '',
+        message: json['message'] as String? ?? '',
+        at: DateTime.tryParse(json['at'] as String? ?? '') ?? DateTime.now(),
+        actorName: json['actorName'] as String? ?? 'Sistema',
       );
 }
 

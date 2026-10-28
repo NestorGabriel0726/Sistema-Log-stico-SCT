@@ -37,17 +37,22 @@ void main() {
   }
 
   testWidgets('modo edição carrega dados e título correto', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1280, 900));
+    await tester.binding.setSurfaceSize(const Size(1280, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await pumpEditForm(tester);
 
     expect(find.text('Editar passagem'), findsOneWidget);
-    expect(find.text('Salvar alterações'), findsOneWidget);
     expect(find.text('Histórico financeiro'), findsOneWidget);
     expect(find.text('Ana Silva'), findsWidgets);
+
+    final saveButton = find.text('Salvar alterações');
+    await tester.scrollUntilVisible(saveButton, 200, scrollable: find.byType(Scrollable).first);
+    expect(saveButton, findsOneWidget);
   });
 
   testWidgets('alterar campos sem salvar não modifica o store', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1280, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final store = await pumpEditForm(tester);
     final before = store.passageById('pass-1')!;
 
@@ -62,6 +67,7 @@ void main() {
 
   testWidgets('modo criação usa título Nova passagem', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1280, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final store = LocalAppStore();
     store.signIn(name: 'Carlos', role: UserRole.coordinator);
 
