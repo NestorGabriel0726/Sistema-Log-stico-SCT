@@ -51,7 +51,7 @@ void main() {
   });
 
   testWidgets('alterar campos sem salvar não modifica o store', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1280, 900));
+    await tester.binding.setSurfaceSize(const Size(1280, 1600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final store = await pumpEditForm(tester);
     final before = store.passageById('pass-1')!;
@@ -66,7 +66,7 @@ void main() {
   });
 
   testWidgets('modo criação usa título Nova passagem', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1280, 900));
+    await tester.binding.setSurfaceSize(const Size(1280, 1600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final store = LocalAppStore();
     store.signIn(name: 'Carlos', role: UserRole.coordinator);
@@ -86,5 +86,27 @@ void main() {
     expect(find.text('Nova passagem'), findsOneWidget);
     expect(find.text('Registrar passagem'), findsOneWidget);
     expect(find.text('Histórico financeiro'), findsNothing);
+  });
+
+  testWidgets('exibe mensagem de elegibilidade e calcula isenção por data de nascimento', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final store = LocalAppStore();
+    store.signIn(name: 'Carlos', role: UserRole.coordinator);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          localStoreProvider.overrideWith((ref) => store),
+        ],
+        child: const MaterialApp(
+          home: PassageFormPage(eventId: SeedData.eventId),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Mensagem inicial de data não informada
+    expect(find.textContaining('o cálculo da isenção ainda não pode ser realizado'), findsOneWidget);
   });
 }

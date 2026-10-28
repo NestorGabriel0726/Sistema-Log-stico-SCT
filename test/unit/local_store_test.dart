@@ -458,4 +458,179 @@ void main() {
       expect(sA.totalCents, greaterThan(0));
     });
   });
+  group('Pontos de parada e alocações', () {
+    test('veículo aceita pontos de parada e valida alocação com ponto', () {
+      final store = signedStore();
+      final stops = [
+        const VehicleStop(id: 's1', name: 'Terminal Central', reference: 'Plataforma A', sequence: 1),
+        const VehicleStop(id: 's2', name: 'Praça das Flores', reference: 'Em frente à igreja', sequence: 2),
+      ];
+
+      final res = store.addVehicle(
+        eventId: SeedData.eventId,
+        name: 'Ônibus 03',
+        type: VehicleType.bus,
+        physicalCapacity: 40,
+        localCapacity: 40,
+        stops: stops,
+      );
+      expect(res.ok, isTrue);
+
+      final v = store.vehiclesForEvent(SeedData.eventId).firstWhere((x) => x.name == 'Ônibus 03');
+      expect(v.stops.length, 2);
+      expect(v.stops[0].name, 'Terminal Central');
+      expect(v.stops[1].name, 'Praça das Flores');
+
+      // Tenta alocar passageiro sem informar ponto num veículo que possui pontos cadastrados
+      final allocResNoStop = store.allocate(
+        passengerId: 'p6',
+        vehicleId: v.id,
+        dayId: 'day-3',
+      );
+      expect(allocResNoStop.ok, isFalse);
+      expect(allocResNoStop.message, contains('ponto de parada'));
+
+      // Alocação com ponto válido
+      final allocRes = store.allocate(
+        passengerId: 'p6',
+        vehicleId: v.id,
+        dayId: 'day-3',
+        stopId: 's1',
+      );
+      expect(allocRes.ok, isTrue);
+
+      final alloc = store.allocationsForVehicleDay(v.id, 'day-3').firstWhere((a) => a.passengerId == 'p6');
+      expect(alloc.stopId, 's1');
+      expect(store.stopById(v.id, 's1')?.name, 'Terminal Central');
+    });
+
+    test('realocação permite atualizar o ponto de embarque', () {
+      final store = signedStore();
+      final stops1 = [
+        const VehicleStop(id: 's1', name: 'Ponto Origem', sequence: 1),
+      ];
+      final stops2 = [
+        const VehicleStop(id: 's2', name: 'Ponto Destino', sequence: 1),
+      ];
+
+      final res1 = store.addVehicle(
+        eventId: SeedData.eventId,
+        name: 'Ônibus R1',
+        type: VehicleType.bus,
+        physicalCapacity: 40,
+        localCapacity: 40,
+        stops: stops1,
+      );
+      expect(res1.ok, isTrue);
+      final v1 = store.vehiclesForEvent(SeedData.eventId).firstWhere((x) => x.name == 'Ônibus R1');
+
+      final res2 = store.addVehicle(
+        eventId: SeedData.eventId,
+        name: 'Ônibus R2',
+        type: VehicleType.bus,
+        physicalCapacity: 40,
+        localCapacity: 40,
+        stops: stops2,
+      );
+      expect(res2.ok, isTrue);
+      final v2 = store.vehiclesForEvent(SeedData.eventId).firstWhere((x) => x.name == 'Ônibus R2');
+
+      final allocRes = store.allocate(
+        passengerId: 'p6',
+        vehicleId: v1.id,
+        dayId: 'day-3',
+        stopId: 's1',
+      );
+      expect(allocRes.ok, isTrue);
+      final alloc = store.allocationsForVehicleDay(v1.id, 'day-3').firstWhere((a) => a.passengerId == 'p6');
+      expect(alloc.stopId, 's1');
+
+      // Realoca para v2 escolhendo s2
+      final relocRes = store.relocate(
+        allocationId: alloc.id,
+        targetVehicleId: v2.id,
+        targetStopId: 's2',
+        confirmed: true,
+      );
+      expect(relocRes.ok, isTrue);
+
+      final active = store.allocationsForVehicleDay(v2.id, 'day-3').firstWhere((a) => a.passengerId == 'p6');
+      expect(active.stopId, 's2');
+      expect(active.vehicleId, v2.id);
+    });
+
+    test('remover ponto com passageiros exige reatribuição', () {
+      final store = signedStore();
+      final stops = [
+        const VehicleStop(id: 'st-a', name: 'Parada A', sequence: 1),
+        const VehicleStop(id: 'st-b', name: 'Parada B', sequence: 2),
+      ];
+
+      final res = store.addVehicle(
+        eventId: SeedData.eventId,
+        name: 'Ônibus Seguro',
+        type: VehicleType.bus,
+        physicalCapacity: 40,
+        localCapacity: 40,
+        stops: stops,
+      );
+      expect(res.ok, isTrue);
+      final v = store.vehiclesForEvent(SeedData.eventId).firstWhere((x) => x.name == 'Ônibus Seguro');
+
+      store.allocate(
+        passengerId: 'p6',
+        vehicleId: v.id,
+        dayId: 'day-3',
+        stopId: 'st-a',
+      );
+
+      // Tenta remover 'st-a' sem reatribuir
+      final failRes = store.updateVehicle(
+        v.copyWith(stops: [stops[1]]),
+      );
+      expect(failRes.ok, isFalse);
+      expect(failRes.message, contains('associado'));
+
+      // Atualiza fornecendo reatribuição para 'st-b'
+      final successRes = store.updateVehicle(
+        v.copyWith(stops: [stops[1]]),
+        reassignStops: {'st-a': 'st-b'},
+      );
+      expect(successRes.ok, isTrue);
+
+      final reallocated = store.allocationsForVehicleDay(v.id, 'day-3').firstWhere((a) => a.passengerId == 'p6');
+      expect(reallocated.stopId, 'st-b');
+    });
+  });
+
+  group('Reversão de check-in', () {
+    test('revertCheckIn desfaz check-in de ida e volta', () {
+      final store = signedStore();
+      expect(store.hasCheckIn('a1', 'OUTBOUND'), isFalse);
+
+      final checkRes = store.performCheckIn('a1', 'OUTBOUND');
+      expect(checkRes.ok, isTrue);
+      expect(store.hasCheckIn('a1', 'OUTBOUND'), isTrue);
+
+      final undoRes = store.revertCheckIn('a1', 'OUTBOUND');
+      expect(undoRes.ok, isTrue);
+      expect(store.hasCheckIn('a1', 'OUTBOUND'), isFalse);
+    });
+  });
+
+  group('Cálculo financeiro dinâmico por data de nascimento', () {
+    test('passageiro com menos de 6 anos é isento mesmo sem categoria isento manual', () {
+      final store = signedStore();
+      final event = store.eventById(SeedData.eventId)!;
+      // p3 nasceu em 2021 -> tem 5 anos em out/2026 -> isento
+      final p3 = store.passengerById('p3')!;
+      final expected = store.expectedCentsForPassenger(p3, event);
+      expect(expected, 0);
+
+      // p1 é adulto -> pagante
+      final p1 = store.passengerById('p1')!;
+      final expectedP1 = store.expectedCentsForPassenger(p1, event);
+      expect(expectedP1, greaterThan(0));
+    });
+  });
 }

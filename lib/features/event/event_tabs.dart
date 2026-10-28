@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/formatters.dart';
+import '../../core/utils/domain_calculations.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/widgets/ui_bits.dart';
@@ -9,6 +10,7 @@ import '../../data/local_app_store.dart';
 import '../../data/providers.dart';
 import '../../domain/models.dart';
 import 'passage_form_page.dart';
+import 'package:uuid/uuid.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Visão Geral
@@ -487,6 +489,77 @@ class VehiclesTab extends ConsumerStatefulWidget {
 class _VehiclesTabState extends ConsumerState<VehiclesTab> {
   String? _dayId;
 
+  void _showStopsDialog(BuildContext context, WidgetRef ref, Vehicle vehicle, String? dayId) {
+    final store = ref.read(localStoreProvider);
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Text('${vehicle.name} — Pontos de Parada'),
+          content: SizedBox(
+            width: 500,
+            child: vehicle.stops.isEmpty
+                ? const Text('Nenhum ponto de parada cadastrado.')
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: vehicle.stops.length,
+                    separatorBuilder: (_, __) => const Divider(),
+                    itemBuilder: (_, idx) {
+                      final s = vehicle.stops[idx];
+                      final paxs = store
+                          .allocationsForStop(vehicle.id, s.id)
+                          .where((a) => dayId == null || a.dayId == dayId)
+                          .map((a) => store.passengerById(a.passengerId)?.name ?? '')
+                          .where((name) => name.isNotEmpty)
+                          .toList();
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 12,
+                                child: Text('${s.sequence}', style: const TextStyle(fontSize: 11)),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                              ),
+                              Text('${paxs.length} passageiro(s)', style: const TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                          if (s.reference != null)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 32, top: 2),
+                              child: Text(s.reference!, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            ),
+                          if (paxs.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 32, top: 4),
+                              child: Wrap(
+                                spacing: 4,
+                                runSpacing: 4,
+                                children: paxs
+                                    .map((name) => Chip(
+                                          label: Text(name, style: const TextStyle(fontSize: 11)),
+                                          visualDensity: VisualDensity.compact,
+                                        ))
+                                    .toList(),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar')),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = ref.watch(localStoreProvider);
@@ -621,6 +694,13 @@ class _VehiclesTabState extends ConsumerState<VehiclesTab> {
                                 foreground: AppColors.danger,
                               ),
                             ),
+                          if (v.stops.isNotEmpty)
+                            IconButton(
+                              icon: const Icon(Icons.pin_drop_outlined, size: 18),
+                              tooltip: 'Ver passageiros por parada',
+                              color: AppColors.brand,
+                              onPressed: () => _showStopsDialog(context, ref, v, dayId),
+                            ),
                           if (user.canEditOperations)
                             IconButton(
                               icon: const Icon(Icons.edit_outlined, size: 18),
@@ -644,6 +724,20 @@ class _VehiclesTabState extends ConsumerState<VehiclesTab> {
                         trailing: '$active/${v.localCapacity} vagas',
                       ),
                     ),
+                    if (v.stops.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.md, 0, AppSpacing.md, AppSpacing.xs),
+                        child: Text(
+                          'Itinerário: ${v.stops.map((s) => s.name).join(' → ')}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                            fontSize: 11,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
 
                     // Lista de passageiros
                     if (rows.isNotEmpty) ...[
@@ -728,8 +822,47 @@ class _VehiclesTabState extends ConsumerState<VehiclesTab> {
       ),
     );
     if (chosen == null || !context.mounted) return;
-    final result =
-        store.allocate(passengerId: chosen.id, vehicleId: vehicle.id, dayId: dayId);
+
+    VehicleStop? chosenStop;
+    if (vehicle.stops.isNotEmpty) {
+      chosenStop = await showModalBottomSheet<VehicleStop>(
+        context: context,
+        builder: (ctx) => ListView(
+          children: [
+            const ListTile(
+              leading: Icon(Icons.pin_drop_outlined),
+              title: Text('Selecione o ponto de embarque'),
+              subtitle: Text('Onde o passageiro irá embarcar neste ônibus'),
+            ),
+            ...vehicle.stops.map(
+              (s) => ListTile(
+                leading: CircleAvatar(
+                  radius: 14,
+                  backgroundColor: AppColors.brand.withValues(alpha: 0.1),
+                  child: Text(
+                    '${s.sequence}',
+                    style: const TextStyle(
+                        fontSize: 11, color: AppColors.brand, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                title: Text(s.name),
+                subtitle: s.reference != null ? Text(s.reference!) : null,
+                onTap: () => Navigator.pop(ctx, s),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      );
+      if (chosenStop == null || !context.mounted) return;
+    }
+
+    final result = store.allocate(
+      passengerId: chosen.id,
+      vehicleId: vehicle.id,
+      dayId: dayId,
+      stopId: chosenStop?.id,
+    );
     if (context.mounted) await showStoreMessage(context, result);
   }
 }
@@ -743,6 +876,9 @@ class _AllocationTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final store = ref.watch(localStoreProvider);
     final p = store.passengerById(allocation.passengerId);
+    final stop = allocation.stopId != null
+        ? store.stopById(allocation.vehicleId, allocation.stopId!)
+        : null;
     final dest = allocation.relocatedToVehicleId == null
         ? null
         : store.vehicleById(allocation.relocatedToVehicleId!);
@@ -853,10 +989,11 @@ class _AllocationTile extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 nameWidget,
-                if (statusLabel != null || p?.category != null)
+                if (statusLabel != null || p?.category != null || stop != null)
                   Text(
                     [
                       if (p?.category != null) p!.category.label,
+                      if (stop != null) 'Parada: ${stop.name}',
                       if (statusLabel != null) statusLabel,
                     ].join(' · '),
                     style: theme.textTheme.bodySmall
@@ -929,15 +1066,54 @@ Future<void> _relocateFlow(
     ),
   );
   if (dest == null || !context.mounted) return;
-  var result =
-      store.relocate(allocationId: allocation.id, targetVehicleId: dest.id);
+
+  VehicleStop? chosenStop;
+  if (dest.stops.isNotEmpty) {
+    chosenStop = await showModalBottomSheet<VehicleStop>(
+      context: context,
+      builder: (ctx) => ListView(
+        children: [
+          const ListTile(
+            leading: Icon(Icons.pin_drop_outlined),
+            title: Text('Selecione o ponto de embarque no novo veículo'),
+          ),
+          ...dest.stops.map(
+            (s) => ListTile(
+              leading: CircleAvatar(
+                radius: 14,
+                backgroundColor: AppColors.brand.withValues(alpha: 0.1),
+                child: Text(
+                  '${s.sequence}',
+                  style: const TextStyle(
+                      fontSize: 11, color: AppColors.brand, fontWeight: FontWeight.w700),
+                ),
+              ),
+              title: Text(s.name),
+              subtitle: s.reference != null ? Text(s.reference!) : null,
+              onTap: () => Navigator.pop(ctx, s),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+    if (chosenStop == null || !context.mounted) return;
+  }
+
+  var result = store.relocate(
+    allocationId: allocation.id,
+    targetVehicleId: dest.id,
+    targetStopId: chosenStop?.id,
+  );
   if (result.needsConfirm) {
     final ok = await confirmDialog(context, result.message);
     if (ok) {
       result = store.relocate(
-          allocationId: allocation.id,
-          targetVehicleId: dest.id,
-          confirmed: true);
+        allocationId: allocation.id,
+        targetVehicleId: dest.id,
+        targetStopId: chosenStop?.id,
+        confirmed: true,
+      );
     } else {
       return;
     }
@@ -1065,7 +1241,16 @@ class _PassengersTabState extends ConsumerState<PassengersTab> {
         list.where((p) => p.category == PassengerCategory.minor).toList(),
       _PaxFilter.student =>
         list.where((p) => p.category == PassengerCategory.student).toList(),
-      _PaxFilter.exempt => list.where((p) => p.isExempt).toList(),
+      _PaxFilter.exempt => list.where((p) {
+          if (p.birthDate != null) {
+            return DomainCalculations.isExemptByAge(
+              birthDate: p.birthDate!,
+              eventDate: event.startDate,
+              minimumPayingAge: event.minimumPayingAge,
+            );
+          }
+          return false;
+        }).toList(),
     };
 
     // Busca por nome
@@ -1213,10 +1398,20 @@ class _PassengersTabState extends ConsumerState<PassengersTab> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           if (st != null) StatusChip.finance(st),
+                          if (p.needsAgeReview(event))
+                            const Padding(
+                              padding: EdgeInsets.only(top: 2),
+                              child: StatusChip(
+                                label: 'Revisão Idade',
+                                background: AppColors.warningBg,
+                                foreground: AppColors.warning,
+                                icon: Icons.warning_amber_rounded,
+                              ),
+                            ),
                           if (store.user?.canViewFinance == true) ...[
                             const SizedBox(height: 2),
                             Text(
-                              p.isExempt
+                              due == 0
                                   ? 'Isento'
                                   : AppFormatters.cents(due),
                               style: theme.textTheme.labelSmall?.copyWith(
@@ -1841,7 +2036,42 @@ class CheckInTab extends ConsumerStatefulWidget {
 }
 
 class _CheckInTabState extends ConsumerState<CheckInTab> {
-  String? _dayFilter;
+  String? _dayId;
+  String? _vehicleId;
+  final _search = TextEditingController();
+  bool _sortAlpha = true;
+  bool _filterMinor = false;
+  bool _filterStudent = false;
+  String? _filterStopId;
+  bool _filterRelocations = false;
+  bool _filterDesisted = false;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _search.clear();
+      _sortAlpha = true;
+      _filterMinor = false;
+      _filterStudent = false;
+      _filterStopId = null;
+      _filterRelocations = false;
+      _filterDesisted = false;
+    });
+  }
+
+  bool get _hasActiveFilters =>
+      _search.text.isNotEmpty ||
+      _filterMinor ||
+      _filterStudent ||
+      _filterStopId != null ||
+      _filterRelocations ||
+      _filterDesisted ||
+      !_sortAlpha;
 
   @override
   Widget build(BuildContext context) {
@@ -1861,153 +2091,575 @@ class _CheckInTabState extends ConsumerState<CheckInTab> {
     }
 
     final days = store.daysForEvent(widget.eventId);
-    var allocs = store.allocationsForEvent(widget.eventId);
-
-    if (allocs.isEmpty) {
+    if (days.isEmpty) {
       return const EmptyState(
-        icon: Icons.how_to_reg_outlined,
-        title: 'Nenhuma alocação',
-        subtitle: 'Aloque passageiros nos ônibus primeiro.',
+        icon: Icons.calendar_today_outlined,
+        title: 'Nenhum dia cadastrado',
+        subtitle: 'Cadastre os dias do evento nas Configurações para realizar o check-in.',
       );
     }
 
-    // Filtragem por dia
-    if (_dayFilter != null) {
-      allocs = allocs.where((a) => a.dayId == _dayFilter).toList();
+    _dayId ??= days.first.id;
+    if (!days.any((d) => d.id == _dayId)) {
+      _dayId = days.first.id;
+    }
+
+    final vehicles = store.vehiclesForEvent(widget.eventId);
+    if (vehicles.isEmpty) {
+      return const EmptyState(
+        icon: Icons.directions_bus_outlined,
+        title: 'Nenhum veículo cadastrado',
+        subtitle: 'Adicione ônibus na aba Ônibus para organizar os embarques.',
+      );
+    }
+
+    _vehicleId ??= vehicles.first.id;
+    if (!vehicles.any((v) => v.id == _vehicleId)) {
+      _vehicleId = vehicles.first.id;
+    }
+
+    final currentVehicle = vehicles.firstWhere((v) => v.id == _vehicleId);
+    final currentDay = days.firstWhere((d) => d.id == _dayId);
+
+    // Alocações do veículo e dia selecionados
+    final vehicleDayAllocs = store.allocationsForVehicleDay(currentVehicle.id, _dayId!);
+    final activeAllocs = vehicleDayAllocs.where((a) => a.isActive).toList();
+
+    // Contadores contextuais estritos (Veículo + Dia selecionados)
+    final totalActive = activeAllocs.length;
+    final outboundDone = activeAllocs.where((a) => store.hasCheckIn(a.id, 'OUTBOUND')).length;
+    final outboundPending = totalActive - outboundDone;
+    final returnDone = activeAllocs.where((a) => store.hasCheckIn(a.id, 'RETURN')).length;
+    final returnPending = totalActive - returnDone;
+
+    // Aplicação dos filtros para a lista de exibição
+    List<Allocation> displayList;
+    if (_filterDesisted) {
+      displayList = vehicleDayAllocs.where((a) => a.status == AllocationStatus.desisted).toList();
+    } else if (_filterRelocations) {
+      displayList = vehicleDayAllocs.where((a) => a.status == AllocationStatus.relocated || a.replacedPassengerId != null).toList();
+    } else {
+      displayList = List<Allocation>.from(activeAllocs);
+    }
+
+    // Filtro por parada
+    if (_filterStopId != null) {
+      displayList = displayList.where((a) => a.stopId == _filterStopId).toList();
+    }
+
+    // Filtro menores
+    if (_filterMinor) {
+      displayList = displayList.where((a) {
+        final p = store.passengerById(a.passengerId);
+        if (p == null) return false;
+        if (p.category == PassengerCategory.minor) return true;
+        if (p.birthDate != null) {
+          return DomainCalculations.calculateAgeOnDate(
+                birthDate: p.birthDate!,
+                targetDate: event.startDate,
+              ) <
+              18;
+        }
+        return false;
+      }).toList();
+    }
+
+    // Filtro estudantes
+    if (_filterStudent) {
+      displayList = displayList.where((a) {
+        final p = store.passengerById(a.passengerId);
+        return p?.category == PassengerCategory.student;
+      }).toList();
+    }
+
+    // Busca textual por nome
+    final query = _search.text.trim().toLowerCase();
+    if (query.isNotEmpty) {
+      displayList = displayList.where((a) {
+        final p = store.passengerById(a.passengerId);
+        return p != null && p.name.toLowerCase().contains(query);
+      }).toList();
+    }
+
+    // Ordenação alfabética
+    if (_sortAlpha) {
+      displayList.sort((a, b) {
+        final nameA = store.passengerById(a.passengerId)?.name.toLowerCase() ?? '';
+        final nameB = store.passengerById(b.passengerId)?.name.toLowerCase() ?? '';
+        return nameA.compareTo(nameB);
+      });
     }
 
     return Column(
       children: [
-        // Filtro por dia
-        if (days.isNotEmpty)
-          Container(
-            color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
-            child: Column(
-              children: [
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-                  child: Row(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(right: AppSpacing.sm),
-                        child: ChoiceChip(
-                          label: const Text('Todos'),
-                          selected: _dayFilter == null,
-                          onSelected: (_) =>
-                              setState(() => _dayFilter = null),
-                        ),
-                      ),
-                      ...days.map((d) {
-                        return Padding(
-                          padding: const EdgeInsets.only(right: AppSpacing.sm),
-                          child: ChoiceChip(
-                            label: Text(d.label),
-                            selected: _dayFilter == d.id,
-                            onSelected: (_) =>
-                                setState(() => _dayFilter = d.id),
-                          ),
-                        );
-                      }),
-                    ],
+        // ── 1. Barra de Seleção: Dia do Evento & Veículo ──
+        Container(
+          color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Seleção de Dia
+              Row(
+                children: [
+                  const Icon(Icons.event_available_outlined, size: 16, color: AppColors.brand),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Dia:',
+                    style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
                   ),
-                ),
-                Divider(
-                  height: 1,
-                  color: isDark ? AppColors.borderDark : AppColors.borderLight,
-                ),
-              ],
-            ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: days.map((d) {
+                          final isSel = _dayId == d.id;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: ChoiceChip(
+                              label: Text(d.label),
+                              selected: isSel,
+                              visualDensity: VisualDensity.compact,
+                              onSelected: (_) => setState(() {
+                                _dayId = d.id;
+                                _filterStopId = null;
+                              }),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              // Seleção de Veículo
+              Row(
+                children: [
+                  const Icon(Icons.directions_bus_outlined, size: 16, color: AppColors.brand),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Veículo:',
+                    style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: vehicles.map((v) {
+                          final isSel = _vehicleId == v.id;
+                          final occ = store
+                              .allocationsForVehicleDay(v.id, _dayId!)
+                              .where((a) => a.isActive)
+                              .length;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: ChoiceChip(
+                              avatar: Icon(
+                                v.type == VehicleType.bus ? Icons.directions_bus : Icons.directions_car,
+                                size: 14,
+                              ),
+                              label: Text('${v.name} ($occ/${v.localCapacity})'),
+                              selected: isSel,
+                              visualDensity: VisualDensity.compact,
+                              onSelected: (_) => setState(() {
+                                _vehicleId = v.id;
+                                _filterStopId = null;
+                              }),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
+        ),
+        Divider(height: 1, color: isDark ? AppColors.borderDark : AppColors.borderLight),
 
-        // Lista de check-in
+        // ── 2. Resumo de Contadores Contextuais ──
+        Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          color: isDark ? AppColors.canvasDark : AppColors.canvasLight,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth > 650;
+              final cards = [
+                _CheckInMetricCard(
+                  title: 'Passageiros na Lista',
+                  value: '$totalActive',
+                  subtitle: '${currentVehicle.name} · ${currentDay.label}',
+                  accentColor: AppColors.brand,
+                  icon: Icons.people_outline_rounded,
+                ),
+                _CheckInMetricCard(
+                  title: 'Check-in Ida',
+                  value: '$outboundDone de $totalActive',
+                  subtitle: outboundPending == 0 && totalActive > 0
+                      ? 'Todos embarcados!'
+                      : '$outboundPending pendente(s)',
+                  accentColor: outboundDone == totalActive && totalActive > 0
+                      ? AppColors.success
+                      : (outboundDone > 0 ? AppColors.brand : AppColors.warning),
+                  icon: Icons.flight_takeoff_rounded,
+                  progress: totalActive == 0 ? 0 : outboundDone / totalActive,
+                ),
+                _CheckInMetricCard(
+                  title: 'Check-in Volta',
+                  value: '$returnDone de $totalActive',
+                  subtitle: returnPending == 0 && totalActive > 0
+                      ? 'Todos embarcados!'
+                      : '$returnPending pendente(s)',
+                  accentColor: returnDone == totalActive && totalActive > 0
+                      ? AppColors.success
+                      : (returnDone > 0 ? AppColors.info : AppColors.warning),
+                  icon: Icons.flight_land_rounded,
+                  progress: totalActive == 0 ? 0 : returnDone / totalActive,
+                ),
+              ];
+
+              if (isWide) {
+                return Row(
+                  children: cards.map((c) => Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: c))).toList(),
+                );
+              } else {
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: cards.map((c) => SizedBox(width: 200, child: Padding(padding: const EdgeInsets.only(right: 8), child: c))).toList(),
+                  ),
+                );
+              }
+            },
+          ),
+        ),
+
+        // ── 3. Barra de Busca e Filtros Avançados ──
+        Container(
+          color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+          padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.sm),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Linha de Busca Textual
+              TextField(
+                controller: _search,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: 'Buscar passageiro por nome...',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  suffixIcon: _search.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 18),
+                          onPressed: () {
+                            _search.clear();
+                            setState(() {});
+                          },
+                        )
+                      : null,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+
+              // Linha de Filtros
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    FilterChip(
+                      avatar: const Icon(Icons.sort_by_alpha_rounded, size: 14),
+                      label: const Text('A–Z'),
+                      selected: _sortAlpha,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (val) => setState(() => _sortAlpha = val),
+                    ),
+                    const SizedBox(width: 6),
+                    FilterChip(
+                      avatar: const Icon(Icons.child_care_rounded, size: 14),
+                      label: const Text('Menores'),
+                      selected: _filterMinor,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (val) => setState(() => _filterMinor = val),
+                    ),
+                    const SizedBox(width: 6),
+                    FilterChip(
+                      avatar: const Icon(Icons.school_rounded, size: 14),
+                      label: const Text('Estudantes'),
+                      selected: _filterStudent,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (val) => setState(() => _filterStudent = val),
+                    ),
+                    const SizedBox(width: 6),
+                    // Seletor de Ponto de Parada
+                    if (currentVehicle.stops.isNotEmpty)
+                      PopupMenuButton<String?>(
+                        onSelected: (stopId) => setState(() => _filterStopId = stopId),
+                        child: Chip(
+                          avatar: const Icon(Icons.pin_drop_outlined, size: 14),
+                          label: Text(
+                            _filterStopId == null
+                                ? 'Parada: Todas'
+                                : 'Parada: ${store.stopById(currentVehicle.id, _filterStopId!)?.name ?? '—'}',
+                          ),
+                          backgroundColor: _filterStopId != null
+                              ? AppColors.brand.withValues(alpha: 0.15)
+                              : null,
+                          deleteIcon: _filterStopId != null
+                              ? const Icon(Icons.close, size: 14)
+                              : const Icon(Icons.arrow_drop_down, size: 16),
+                          onDeleted: _filterStopId != null
+                              ? () => setState(() => _filterStopId = null)
+                              : null,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        itemBuilder: (ctx) => [
+                          const PopupMenuItem<String?>(
+                            value: null,
+                            child: Text('Todas as paradas'),
+                          ),
+                          ...currentVehicle.stops.map(
+                            (s) => PopupMenuItem<String?>(
+                              value: s.id,
+                              child: Text('#${s.sequence} - ${s.name}'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(width: 6),
+                    FilterChip(
+                      avatar: const Icon(Icons.swap_horiz_rounded, size: 14),
+                      label: const Text('Realocações'),
+                      selected: _filterRelocations,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (val) => setState(() {
+                        _filterRelocations = val;
+                        if (val) _filterDesisted = false;
+                      }),
+                    ),
+                    const SizedBox(width: 6),
+                    FilterChip(
+                      avatar: const Icon(Icons.cancel_outlined, size: 14),
+                      label: const Text('Desistências'),
+                      selected: _filterDesisted,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (val) => setState(() {
+                        _filterDesisted = val;
+                        if (val) _filterRelocations = false;
+                      }),
+                    ),
+                    if (_hasActiveFilters) ...[
+                      const SizedBox(width: 8),
+                      ActionChip(
+                        avatar: const Icon(Icons.filter_alt_off_outlined, size: 14),
+                        label: const Text('Limpar filtros'),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: _clearFilters,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        Divider(height: 1, color: isDark ? AppColors.borderDark : AppColors.borderLight),
+
+        // ── 4. Lista de Passageiros do Veículo ──
         Expanded(
-          child: allocs.isEmpty
-              ? const EmptyState(
-                  icon: Icons.how_to_reg_outlined,
-                  title: 'Nenhum passageiro neste dia',
+          child: displayList.isEmpty
+              ? EmptyState(
+                  icon: _filterDesisted
+                      ? Icons.cancel_outlined
+                      : (_filterRelocations
+                          ? Icons.swap_horiz_rounded
+                          : Icons.how_to_reg_outlined),
+                  title: _filterDesisted
+                      ? 'Nenhuma desistência registrada'
+                      : (_filterRelocations
+                          ? 'Nenhuma realocação registrada'
+                          : (_hasActiveFilters
+                              ? 'Nenhum passageiro encontrado com esses filtros'
+                              : 'Nenhum passageiro alocado')),
+                  subtitle: _hasActiveFilters
+                      ? 'Tente ajustar ou limpar os filtros de busca.'
+                      : 'Aloque passageiros neste ônibus na aba "Ônibus" para gerenciar o check-in.',
+                  action: _hasActiveFilters
+                      ? OutlinedButton.icon(
+                          onPressed: _clearFilters,
+                          icon: const Icon(Icons.filter_alt_off_outlined, size: 16),
+                          label: const Text('Limpar filtros'),
+                        )
+                      : null,
                 )
               : ListView.separated(
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  itemCount: allocs.length,
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+                  itemCount: displayList.length,
                   separatorBuilder: (_, __) => Divider(
                     height: 1,
                     color: isDark ? AppColors.borderDark : AppColors.borderLight,
-                    indent: 56,
                   ),
                   itemBuilder: (context, i) {
-                    final a = allocs[i];
+                    final a = displayList[i];
                     final p = store.passengerById(a.passengerId);
-                    final v = store.vehicleById(a.vehicleId);
-                    final out = store.hasCheckIn(a.id, 'OUTBOUND');
-                    final back = store.hasCheckIn(a.id, 'RETURN');
-                    final bothDone = out && back;
+                    final stop = a.stopId != null ? store.stopById(a.vehicleId, a.stopId!) : null;
+                    final outDone = store.hasCheckIn(a.id, 'OUTBOUND');
+                    final returnDone = store.hasCheckIn(a.id, 'RETURN');
+                    final sub = a.substitutePassengerId != null ? store.passengerById(a.substitutePassengerId!) : null;
+                    final replaced = a.replacedPassengerId != null ? store.passengerById(a.replacedPassengerId!) : null;
 
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.md, vertical: AppSpacing.xs),
-                      leading: CircleAvatar(
-                        radius: 18,
-                        backgroundColor: bothDone
-                            ? AppColors.success.withValues(alpha: 0.1)
-                            : AppColors.brand.withValues(alpha: 0.1),
-                        child: Icon(
-                          bothDone
-                              ? Icons.check_rounded
-                              : Icons.person_outline_rounded,
-                          size: 18,
-                          color: bothDone ? AppColors.success : AppColors.brand,
-                        ),
-                      ),
-                      title: Text(
-                        p?.name ?? 'Passageiro',
-                        style: theme.textTheme.bodyMedium
-                            ?.copyWith(fontWeight: FontWeight.w600),
-                      ),
-                      subtitle: Text(
-                        [
-                          v?.name ?? '',
-                          if (_dayFilter == null) ...[
-                            for (final d in days)
-                              if (d.id == a.dayId) d.label,
+                    return Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          // Avatar de status / posição
+                          CircleAvatar(
+                            radius: 18,
+                            backgroundColor: outDone && returnDone
+                                ? AppColors.success.withValues(alpha: 0.12)
+                                : AppColors.brand.withValues(alpha: 0.08),
+                            child: Icon(
+                              outDone && returnDone
+                                  ? Icons.done_all_rounded
+                                  : Icons.person_outline_rounded,
+                              size: 18,
+                              color: outDone && returnDone ? AppColors.success : AppColors.brand,
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+
+                          // Dados do passageiro, categoria, parada e situação
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        p?.name ?? 'Passageiro',
+                                        style: theme.textTheme.bodyMedium?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                          decoration: a.status == AllocationStatus.desisted
+                                              ? TextDecoration.lineThrough
+                                              : null,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (p?.category == PassengerCategory.minor) ...[
+                                      const SizedBox(width: 6),
+                                      const StatusChip(label: 'Menor', icon: Icons.child_care_rounded),
+                                    ],
+                                    if (p?.category == PassengerCategory.student) ...[
+                                      const SizedBox(width: 6),
+                                      const StatusChip(label: 'Estudante', icon: Icons.school_rounded),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 2,
+                                  children: [
+                                    // Ponto de Parada
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.pin_drop_outlined, size: 13, color: AppColors.brand),
+                                        const SizedBox(width: 3),
+                                        Text(
+                                          stop != null ? stop.name : 'Parada não informada',
+                                          style: theme.textTheme.bodySmall?.copyWith(
+                                            color: cs.onSurfaceVariant,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    // Situação da alocação
+                                    if (a.status == AllocationStatus.desisted)
+                                      Text(
+                                        sub != null ? 'Desistiu (Substituído por ${sub.name})' : 'Desistente',
+                                        style: const TextStyle(fontSize: 11, color: AppColors.danger, fontWeight: FontWeight.bold),
+                                      )
+                                    else if (a.status == AllocationStatus.relocated)
+                                      const Text(
+                                        'Realocado para outro ônibus',
+                                        style: TextStyle(fontSize: 11, color: AppColors.warning, fontWeight: FontWeight.bold),
+                                      )
+                                    else if (replaced != null)
+                                      Text(
+                                        'Substituto de ${replaced.name}',
+                                        style: const TextStyle(fontSize: 11, color: AppColors.info, fontWeight: FontWeight.w600),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(width: AppSpacing.sm),
+
+                          // Controles de Check-in (Ida e Volta)
+                          if (a.isActive) ...[
+                            _CheckButton(
+                              label: 'Ida',
+                              done: outDone,
+                              onTap: () async {
+                                final r = store.performCheckIn(a.id, 'OUTBOUND');
+                                if (context.mounted) await showStoreMessage(context, r);
+                              },
+                              onUndo: () async {
+                                final ok = await confirmDialog(
+                                  context,
+                                  'Deseja desfazer o check-in de IDA de ${p?.name}?',
+                                );
+                                if (ok) {
+                                  final r = store.revertCheckIn(a.id, 'OUTBOUND');
+                                  if (context.mounted) await showStoreMessage(context, r);
+                                }
+                              },
+                            ),
+                            const SizedBox(width: 6),
+                            _CheckButton(
+                              label: 'Volta',
+                              done: returnDone,
+                              onTap: () async {
+                                final r = store.performCheckIn(a.id, 'RETURN');
+                                if (context.mounted) await showStoreMessage(context, r);
+                              },
+                              onUndo: () async {
+                                final ok = await confirmDialog(
+                                  context,
+                                  'Deseja desfazer o check-in de VOLTA de ${p?.name}?',
+                                );
+                                if (ok) {
+                                  final r = store.revertCheckIn(a.id, 'RETURN');
+                                  if (context.mounted) await showStoreMessage(context, r);
+                                }
+                              },
+                            ),
+                          ] else ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: cs.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                a.status == AllocationStatus.desisted ? 'Desistente' : 'Inativo',
+                                style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                              ),
+                            ),
                           ],
-                        ].where((s) => s.isNotEmpty).join(' · '),
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: cs.onSurfaceVariant),
-                      ),
-                      trailing: LayoutBuilder(
-                        builder: (context, constraints) {
-                          // Adapta o layout de check-in ao espaço disponível
-                          return Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              _CheckButton(
-                                label: 'Ida',
-                                done: out,
-                                onTap: () async {
-                                  final r = store.performCheckIn(
-                                      a.id, 'OUTBOUND');
-                                  if (context.mounted) {
-                                    await showStoreMessage(context, r);
-                                  }
-                                },
-                              ),
-                              const SizedBox(width: AppSpacing.sm),
-                              _CheckButton(
-                                label: 'Volta',
-                                done: back,
-                                onTap: () async {
-                                  final r =
-                                      store.performCheckIn(a.id, 'RETURN');
-                                  if (context.mounted) {
-                                    await showStoreMessage(context, r);
-                                  }
-                                },
-                              ),
-                            ],
-                          );
-                        },
+                        ],
                       ),
                     );
                   },
@@ -2018,51 +2670,131 @@ class _CheckInTabState extends ConsumerState<CheckInTab> {
   }
 }
 
+class _CheckInMetricCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final String subtitle;
+  final Color accentColor;
+  final IconData icon;
+  final double? progress;
+
+  const _CheckInMetricCard({
+    required this.title,
+    required this.value,
+    required this.subtitle,
+    required this.accentColor,
+    required this.icon,
+    this.progress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+        border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: accentColor),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  style: theme.textTheme.labelSmall?.copyWith(color: accentColor, fontWeight: FontWeight.w700),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            subtitle,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
+              fontSize: 11,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (progress != null) ...[
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(
+                value: progress!.clamp(0.0, 1.0),
+                minHeight: 4,
+                backgroundColor: accentColor.withValues(alpha: 0.15),
+                valueColor: AlwaysStoppedAnimation<Color>(accentColor),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _CheckButton extends StatelessWidget {
   final String label;
   final bool done;
   final VoidCallback onTap;
+  final VoidCallback? onUndo;
 
   const _CheckButton({
     required this.label,
     required this.done,
     required this.onTap,
+    this.onUndo,
   });
 
   @override
   Widget build(BuildContext context) {
     return done
-        ? Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: AppColors.success.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-              border: Border.all(
-                  color: AppColors.success.withValues(alpha: 0.3)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.check_rounded,
-                    size: 12, color: AppColors.success),
-                const SizedBox(width: 4),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.success,
+        ? InkWell(
+            onTap: onUndo,
+            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.success.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                border: Border.all(color: AppColors.success.withValues(alpha: 0.35)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.check_rounded, size: 14, color: AppColors.success),
+                  const SizedBox(width: 4),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.success,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           )
         : OutlinedButton(
             onPressed: onTap,
             style: OutlinedButton.styleFrom(
-              minimumSize: const Size(60, 32),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              minimumSize: const Size(64, 32),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               side: const BorderSide(color: AppColors.brand),
               foregroundColor: AppColors.brand,
               textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
@@ -2071,7 +2803,6 @@ class _CheckButton extends StatelessWidget {
           );
   }
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Histórico
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2264,7 +2995,7 @@ class _SettingsSection extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// showVehicleSheet — bottom sheet de criação/edição de veículo
+// showVehicleSheet — bottom sheet de criação/edição de veículo com paradas
 // ─────────────────────────────────────────────────────────────────────────────
 
 Future<void> showVehicleSheet(
@@ -2273,12 +3004,15 @@ Future<void> showVehicleSheet(
   String eventId, {
   Vehicle? existing,
 }) async {
+  const uuid = Uuid();
   final name = TextEditingController(text: existing?.name ?? '');
   final physical = TextEditingController(
       text: '${existing?.physicalCapacity ?? 46}');
   final local =
       TextEditingController(text: '${existing?.localCapacity ?? 30}');
   var type = existing?.type ?? VehicleType.bus;
+  final stops = <VehicleStop>[...(existing?.stops ?? const [])];
+  final reassignStops = <String, String>{};
 
   await showModalBottomSheet<void>(
     context: context,
@@ -2293,91 +3027,381 @@ Future<void> showVehicleSheet(
         ),
         child: StatefulBuilder(
           builder: (ctx, setLocal) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      existing == null
-                          ? Icons.add_circle_outline
-                          : Icons.edit_outlined,
-                      color: AppColors.brand,
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Text(
-                      existing == null ? 'Novo veículo' : 'Editar veículo',
-                      style: Theme.of(ctx).textTheme.titleMedium,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                TextField(
-                  controller: name,
-                  decoration: const InputDecoration(
-                    labelText: 'Nome do veículo',
-                    hintText: 'Ex.: Ônibus 1',
-                    prefixIcon: Icon(Icons.directions_bus_outlined, size: 20),
-                  ),
-                  textInputAction: TextInputAction.next,
-                ),
-                const SizedBox(height: AppSpacing.md),
-                DropdownButtonFormField<VehicleType>(
-                  value: type,
-                  decoration: const InputDecoration(
-                    labelText: 'Tipo',
-                    prefixIcon: Icon(Icons.category_outlined, size: 20),
-                  ),
-                  items: VehicleType.values
-                      .map((t) =>
-                          DropdownMenuItem(value: t, child: Text(t.label)))
-                      .toList(),
-                  onChanged: (v) => setLocal(() => type = v ?? type),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: physical,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Capacidade física',
-                        ),
-                        textInputAction: TextInputAction.next,
+            final theme = Theme.of(ctx);
+            final cs = theme.colorScheme;
+            final isDark = theme.brightness == Brightness.dark;
+
+            return SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        existing == null
+                            ? Icons.add_circle_outline
+                            : Icons.edit_outlined,
+                        color: AppColors.brand,
                       ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: TextField(
-                        controller: local,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Limite local',
-                        ),
-                        textInputAction: TextInputAction.done,
+                      const SizedBox(width: AppSpacing.sm),
+                      Text(
+                        existing == null ? 'Novo veículo' : 'Editar veículo',
+                        style: Theme.of(ctx).textTheme.titleMedium,
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  TextField(
+                    controller: name,
+                    decoration: const InputDecoration(
+                      labelText: 'Nome do veículo',
+                      hintText: 'Ex.: Ônibus 1',
+                      prefixIcon: Icon(Icons.directions_bus_outlined, size: 20),
                     ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                FilledButton.icon(
-                  onPressed: () async {
-                    final store = ref.read(localStoreProvider);
-                    final result = existing == null
-                        ? store.addVehicle(
-                            eventId: eventId,
-                            name: name.text,
-                            type: type,
-                            physicalCapacity:
-                                int.tryParse(physical.text) ?? 0,
-                            localCapacity:
-                                int.tryParse(local.text) ?? 0,
-                          )
-                        : store.updateVehicle(
-                            Vehicle(
-                              id: existing.id,
+                    textInputAction: TextInputAction.next,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  DropdownButtonFormField<VehicleType>(
+                    value: type,
+                    decoration: const InputDecoration(
+                      labelText: 'Tipo',
+                      prefixIcon: Icon(Icons.category_outlined, size: 20),
+                    ),
+                    items: VehicleType.values
+                        .map((t) =>
+                            DropdownMenuItem(value: t, child: Text(t.label)))
+                        .toList(),
+                    onChanged: (v) => setLocal(() => type = v ?? type),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: physical,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Capacidade física',
+                          ),
+                          textInputAction: TextInputAction.next,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: TextField(
+                          controller: local,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Limite local',
+                          ),
+                          textInputAction: TextInputAction.done,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  // Seção de Pontos de Parada
+                  Row(
+                    children: [
+                      const Icon(Icons.pin_drop_outlined, size: 18, color: AppColors.brand),
+                      const SizedBox(width: AppSpacing.xs),
+                      Text(
+                        'Pontos de Parada (${stops.length})',
+                        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const Spacer(),
+                      FilledButton.tonalIcon(
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        ),
+                        onPressed: () async {
+                          final stopNameCtrl = TextEditingController();
+                          final stopRefCtrl = TextEditingController();
+                          final added = await showDialog<bool>(
+                            context: ctx,
+                            builder: (dialogCtx) => AlertDialog(
+                              title: const Text('Nova Parada'),
+                              content: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  TextField(
+                                    controller: stopNameCtrl,
+                                    autofocus: true,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Nome do ponto *',
+                                      hintText: 'Ex.: Praça Central',
+                                    ),
+                                  ),
+                                  const SizedBox(height: AppSpacing.sm),
+                                  TextField(
+                                    controller: stopRefCtrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Referência / Endereço (opcional)',
+                                      hintText: 'Ex.: Ao lado da igreja',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(dialogCtx, false),
+                                  child: const Text('Cancelar'),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(dialogCtx, true),
+                                  child: const Text('Adicionar'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (added == true && stopNameCtrl.text.trim().isNotEmpty) {
+                            setLocal(() {
+                              final newSeq = stops.isEmpty ? 1 : stops.length + 1;
+                              stops.add(
+                                VehicleStop(
+                                  id: uuid.v4(),
+                                  name: stopNameCtrl.text.trim(),
+                                  reference: stopRefCtrl.text.trim().isEmpty ? null : stopRefCtrl.text.trim(),
+                                  sequence: newSeq,
+                                ),
+                              );
+                            });
+                          }
+                        },
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('Adicionar parada'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    'Cadastre e ordene os pontos de embarque do trajeto deste veículo.',
+                    style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+
+                  if (stops.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      decoration: BoxDecoration(
+                        color: isDark ? AppColors.surfaceElevatedDark : AppColors.canvasLight,
+                        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                        border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
+                      ),
+                      child: Text(
+                        'Nenhum ponto cadastrado. Clique em "+ Adicionar parada" para definir o itinerário.',
+                        style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                        textAlign: TextAlign.center,
+                      ),
+                    )
+                  else
+                    ...List.generate(stops.length, (idx) {
+                      final s = stops[idx];
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: isDark ? AppColors.surfaceElevatedDark : AppColors.surfaceLight,
+                          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                          border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 24,
+                              height: 24,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: AppColors.brand.withValues(alpha: 0.1),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Text(
+                                '${idx + 1}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.brand,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(s.name, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                                  if (s.reference != null && s.reference!.isNotEmpty)
+                                    Text(
+                                      s.reference!,
+                                      style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.arrow_upward_rounded, size: 16),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              tooltip: 'Mover para cima',
+                              onPressed: idx > 0
+                                  ? () {
+                                      setLocal(() {
+                                        final item = stops.removeAt(idx);
+                                        stops.insert(idx - 1, item);
+                                        for (var k = 0; k < stops.length; k++) {
+                                          stops[k] = stops[k].copyWith(sequence: k + 1);
+                                        }
+                                      });
+                                    }
+                                  : null,
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.arrow_downward_rounded, size: 16),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              tooltip: 'Mover para baixo',
+                              onPressed: idx < stops.length - 1
+                                  ? () {
+                                      setLocal(() {
+                                        final item = stops.removeAt(idx);
+                                        stops.insert(idx + 1, item);
+                                        for (var k = 0; k < stops.length; k++) {
+                                          stops[k] = stops[k].copyWith(sequence: k + 1);
+                                        }
+                                      });
+                                    }
+                                  : null,
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined, size: 16),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              tooltip: 'Editar parada',
+                              onPressed: () async {
+                                final editName = TextEditingController(text: s.name);
+                                final editRef = TextEditingController(text: s.reference ?? '');
+                                final updated = await showDialog<bool>(
+                                  context: ctx,
+                                  builder: (dialogCtx) => AlertDialog(
+                                    title: const Text('Editar Parada'),
+                                    content: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        TextField(
+                                          controller: editName,
+                                          decoration: const InputDecoration(labelText: 'Nome do ponto *'),
+                                        ),
+                                        const SizedBox(height: AppSpacing.sm),
+                                        TextField(
+                                          controller: editRef,
+                                          decoration: const InputDecoration(labelText: 'Referência (opcional)'),
+                                        ),
+                                      ],
+                                    ),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('Cancelar')),
+                                      FilledButton(onPressed: () => Navigator.pop(dialogCtx, true), child: const Text('Salvar')),
+                                    ],
+                                  ),
+                                );
+                                if (updated == true && editName.text.trim().isNotEmpty) {
+                                  setLocal(() {
+                                    stops[idx] = s.copyWith(
+                                      name: editName.text.trim(),
+                                      reference: editRef.text.trim().isEmpty ? null : editRef.text.trim(),
+                                    );
+                                  });
+                                }
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, size: 16, color: AppColors.error),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              tooltip: 'Remover parada',
+                              onPressed: () async {
+                                if (existing != null) {
+                                  final store = ref.read(localStoreProvider);
+                                  final activeWithStop = store.allocationsForStop(existing.id, s.id);
+                                  if (activeWithStop.isNotEmpty) {
+                                    final otherStops = stops.where((other) => other.id != s.id).toList();
+                                    if (otherStops.isEmpty) {
+                                      await showDialog<void>(
+                                        context: ctx,
+                                        builder: (dCtx) => AlertDialog(
+                                          title: const Text('Parada com passageiros'),
+                                          content: Text(
+                                            'A parada "${s.name}" possui ${activeWithStop.length} passageiro(s) ativo(s) associado(s). '
+                                            'Cadastre outra parada antes de removê-la para reatribuir os passageiros.',
+                                          ),
+                                          actions: [
+                                            FilledButton(
+                                              onPressed: () => Navigator.pop(dCtx),
+                                              child: const Text('Entendido'),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                      return;
+                                    }
+
+                                    VehicleStop? targetStop = otherStops.first;
+                                    final confirmed = await showDialog<bool>(
+                                      context: ctx,
+                                      builder: (dCtx) => StatefulBuilder(
+                                        builder: (dCtx, setDCtx) => AlertDialog(
+                                          title: const Text('Reatribuir passageiros da parada'),
+                                          content: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'A parada "${s.name}" possui ${activeWithStop.length} passageiro(s) ativo(s) associado(s). '
+                                                'Selecione para qual parada esses passageiros serão transferidos:',
+                                              ),
+                                              const SizedBox(height: AppSpacing.md),
+                                              DropdownButtonFormField<VehicleStop>(
+                                                value: targetStop,
+                                                isExpanded: true,
+                                                items: otherStops.map((os) => DropdownMenuItem(value: os, child: Text(os.name))).toList(),
+                                                onChanged: (val) => setDCtx(() => targetStop = val),
+                                                decoration: const InputDecoration(labelText: 'Nova parada'),
+                                              ),
+                                            ],
+                                          ),
+                                          actions: [
+                                            TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Cancelar')),
+                                            FilledButton(onPressed: () => Navigator.pop(dCtx, true), child: const Text('Confirmar e remover')),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                    if (confirmed != true || targetStop == null) return;
+                                    reassignStops[s.id] = targetStop!.id;
+                                  }
+                                }
+                                setLocal(() {
+                                  stops.removeAt(idx);
+                                  for (var k = 0; k < stops.length; k++) {
+                                    stops[k] = stops[k].copyWith(sequence: k + 1);
+                                  }
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+
+                  const SizedBox(height: AppSpacing.lg),
+                  FilledButton.icon(
+                    onPressed: () async {
+                      final store = ref.read(localStoreProvider);
+                      final result = existing == null
+                          ? store.addVehicle(
                               eventId: eventId,
                               name: name.text,
                               type: type,
@@ -2385,17 +3409,30 @@ Future<void> showVehicleSheet(
                                   int.tryParse(physical.text) ?? 0,
                               localCapacity:
                                   int.tryParse(local.text) ?? 0,
-                            ),
-                          );
-                    Navigator.pop(ctx);
-                    if (context.mounted) {
-                      await showStoreMessage(context, result);
-                    }
-                  },
-                  icon: const Icon(Icons.save_rounded, size: 18),
-                  label: const Text('Salvar veículo'),
-                ),
-              ],
+                              stops: stops,
+                            )
+                          : store.updateVehicle(
+                              existing.copyWith(
+                                name: name.text.trim(),
+                                type: type,
+                                physicalCapacity:
+                                    int.tryParse(physical.text) ?? 0,
+                                localCapacity:
+                                    int.tryParse(local.text) ?? 0,
+                                stops: stops,
+                              ),
+                              reassignStops: reassignStops,
+                            );
+                      Navigator.pop(ctx);
+                      if (context.mounted) {
+                        await showStoreMessage(context, result);
+                      }
+                    },
+                    icon: const Icon(Icons.save_rounded, size: 18),
+                    label: const Text('Salvar veículo'),
+                  ),
+                ],
+              ),
             );
           },
         ),

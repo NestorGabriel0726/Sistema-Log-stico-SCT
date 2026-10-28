@@ -26,6 +26,24 @@ abstract class DomainCalculations {
     return age < minimumPayingAge;
   }
 
+  /// Mensagem explicativa de elegibilidade de isenção por idade.
+  static String ageEligibilityMessage({
+    required DateTime? birthDate,
+    required DateTime eventDate,
+    required int minimumPayingAge,
+    required String eventTheme,
+  }) {
+    if (birthDate == null) {
+      return 'Data de nascimento não informada: o cálculo da isenção ainda não pode ser realizado.';
+    }
+    final age = calculateAgeOnDate(birthDate: birthDate, targetDate: eventDate);
+    if (age < minimumPayingAge) {
+      return 'Isento de pagamento: a idade na data do $eventTheme será de $age anos, inferior à idade mínima para cobrança de $minimumPayingAge anos.';
+    } else {
+      return 'A idade na data do $eventTheme será de $age anos. Como é igual ou superior à idade mínima para cobrança de $minimumPayingAge anos, o valor da passagem deve ser cobrado.';
+    }
+  }
+
   /// Calcula o valor devido (em centavos) de um passageiro individual para o evento (Regra 33).
   static int calculatePassengerDueCents({
     required int selectedDaysCount,

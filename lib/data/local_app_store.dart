@@ -321,10 +321,16 @@ class LocalAppStore extends ChangeNotifier {
   }
 
   int expectedCentsForPassenger(Passenger p, TransportEvent event) {
+    final isExempt = p.birthDate != null &&
+        DomainCalculations.isExemptByAge(
+          birthDate: p.birthDate!,
+          eventDate: event.startDate,
+          minimumPayingAge: event.minimumPayingAge,
+        );
     return DomainCalculations.calculatePassengerDueCents(
       selectedDaysCount: p.dayIds.length,
       dailyFareCents: event.dailyFareCents,
-      isExempt: p.isExempt,
+      isExempt: isExempt,
     );
   }
 
@@ -574,12 +580,28 @@ class LocalAppStore extends ChangeNotifier {
     return parts.join(' e ');
   }
 
+  VehicleStop? stopById(String vehicleId, String stopId) {
+    final v = vehicleById(vehicleId);
+    if (v == null) return null;
+    for (final s in v.stops) {
+      if (s.id == stopId) return s;
+    }
+    return null;
+  }
+
+  List<Allocation> allocationsForStop(String vehicleId, String stopId, {bool activeOnly = true}) {
+    return _allocations
+        .where((a) => a.vehicleId == vehicleId && a.stopId == stopId && (!activeOnly || a.isActive))
+        .toList();
+  }
+
   StoreResult addVehicle({
     required String eventId,
     required String name,
     required VehicleType type,
     required int physicalCapacity,
     required int localCapacity,
+    List<VehicleStop> stops = const [],
   }) {
     if (!_canEdit()) return const StoreResult.error('Sem permissão.');
     if (name.trim().isEmpty) return const StoreResult.error('Informe o nome do veículo.');
@@ -589,6 +611,8 @@ class LocalAppStore extends ChangeNotifier {
     if (localCapacity > physicalCapacity) {
       return const StoreResult.error('O limite local não pode ultrapassar a capacidade física.');
     }
+    final sortedStops = List<VehicleStop>.from(stops)
+      ..sort((a, b) => a.sequence.compareTo(b.sequence));
     _vehicles.add(
       Vehicle(
         id: _uuid.v4(),
@@ -597,6 +621,7 @@ class LocalAppStore extends ChangeNotifier {
         type: type,
         physicalCapacity: physicalCapacity,
         localCapacity: localCapacity,
+        stops: sortedStops,
       ),
     );
     _log(eventId, 'Veículo "${name.trim()}" criado ($localCapacity vagas locais).');
@@ -604,14 +629,49 @@ class LocalAppStore extends ChangeNotifier {
     return const StoreResult.ok();
   }
 
-  StoreResult updateVehicle(Vehicle vehicle) {
+  StoreResult updateVehicle(
+    Vehicle vehicle, {
+    Map<String, String>? reassignStops,
+  }) {
     if (!_canEdit()) return const StoreResult.error('Sem permissão.');
     final i = _vehicles.indexWhere((v) => v.id == vehicle.id);
     if (i < 0) return const StoreResult.error('Veículo não encontrado.');
     if (vehicle.localCapacity > vehicle.physicalCapacity) {
       return const StoreResult.error('O limite local não pode ultrapassar a capacidade física.');
     }
-    _vehicles[i] = vehicle;
+    final oldVehicle = _vehicles[i];
+    final newStopIds = vehicle.stops.map((s) => s.id).toSet();
+    final removedStops =
+        oldVehicle.stops.where((s) => !newStopIds.contains(s.id)).toList();
+
+    for (final removed in removedStops) {
+      final activeWithStop = _allocations
+          .where((a) =>
+              a.vehicleId == vehicle.id && a.stopId == removed.id && a.isActive)
+          .toList();
+      if (activeWithStop.isNotEmpty) {
+        final targetStopId = reassignStops?[removed.id];
+        if (targetStopId == null || !newStopIds.contains(targetStopId)) {
+          final count = activeWithStop.length;
+          return StoreResult.error(
+            'A parada "${removed.name}" possui $count passageiro(s) associado(s). '
+            'Selecione uma parada de destino antes de removê-la.',
+          );
+        }
+        for (var j = 0; j < _allocations.length; j++) {
+          final a = _allocations[j];
+          if (a.vehicleId == vehicle.id &&
+              a.stopId == removed.id &&
+              a.isActive) {
+            _allocations[j] = a.copyWith(stopId: targetStopId);
+          }
+        }
+      }
+    }
+
+    final sortedStops = List<VehicleStop>.from(vehicle.stops)
+      ..sort((a, b) => a.sequence.compareTo(b.sequence));
+    _vehicles[i] = vehicle.copyWith(stops: sortedStops);
     _log(vehicle.eventId, 'Veículo "${vehicle.name}" atualizado.');
     _changed();
     return const StoreResult.ok();
@@ -876,6 +936,7 @@ class LocalAppStore extends ChangeNotifier {
     required String passengerId,
     required String vehicleId,
     required String dayId,
+    String? stopId,
   }) {
     if (!_canEdit()) return const StoreResult.error('Sem permissão.');
     final passenger = passengerById(passengerId);
@@ -888,6 +949,11 @@ class LocalAppStore extends ChangeNotifier {
     }
     if (_allocations.any((a) => a.passengerId == passengerId && a.dayId == dayId && a.isActive)) {
       return const StoreResult.error('Passageiro já alocado neste dia.');
+    }
+    if (vehicle.stops.isNotEmpty) {
+      if (stopId == null || !vehicle.stops.any((s) => s.id == stopId)) {
+        return const StoreResult.error('Selecione um ponto de parada válido para este veículo.');
+      }
     }
     final occupied = _allocations
         .where((a) => a.vehicleId == vehicleId && a.dayId == dayId && a.isActive)
@@ -903,6 +969,7 @@ class LocalAppStore extends ChangeNotifier {
         vehicleId: vehicleId,
         dayId: dayId,
         position: next,
+        stopId: stopId,
       ),
     );
     _log(passenger.eventId, '${passenger.name} alocado em ${vehicle.name}.');
@@ -913,6 +980,7 @@ class LocalAppStore extends ChangeNotifier {
   StoreResult relocate({
     required String allocationId,
     required String targetVehicleId,
+    String? targetStopId,
     bool confirmed = false,
   }) {
     if (!_canEdit()) return const StoreResult.error('Sem permissão.');
@@ -927,6 +995,11 @@ class LocalAppStore extends ChangeNotifier {
     final passenger = passengerById(current.passengerId);
     if (dest == null || origin == null || passenger == null) {
       return const StoreResult.error('Dados incompletos.');
+    }
+    if (dest.stops.isNotEmpty) {
+      if (targetStopId == null || !dest.stops.any((s) => s.id == targetStopId)) {
+        return const StoreResult.error('Selecione um ponto de parada válido no veículo de destino.');
+      }
     }
     if (!confirmed) {
       return StoreResult.confirm(
@@ -950,6 +1023,7 @@ class LocalAppStore extends ChangeNotifier {
         vehicleId: targetVehicleId,
         dayId: current.dayId,
         position: occupied + 1,
+        stopId: targetStopId,
       ),
     );
     _log(
@@ -1093,6 +1167,35 @@ class LocalAppStore extends ChangeNotifier {
     _changed();
     return const StoreResult.ok();
   }
+
+  StoreResult revertCheckIn(String allocationId, String direction) {
+    final eventUser = user;
+    final allocation = _allocations.cast<Allocation?>().firstWhere(
+          (a) => a?.id == allocationId,
+          orElse: () => null,
+        );
+    if (allocation == null) {
+      return const StoreResult.error('Alocação não encontrada.');
+    }
+    final passenger = passengerById(allocation.passengerId);
+    if (passenger == null) return const StoreResult.error('Passageiro não encontrado.');
+    final event = eventById(passenger.eventId);
+    if (event == null || eventUser == null || !eventUser.canCheckIn(event)) {
+      return const StoreResult.error('Você não tem permissão para reverter check-in neste evento.');
+    }
+    final index = _checkIns.indexWhere(
+      (c) => c.allocationId == allocationId && c.direction == direction,
+    );
+    if (index < 0) {
+      return const StoreResult.error('Check-in não encontrado.');
+    }
+    _checkIns.removeAt(index);
+    _log(event.id, 'Check-in ${direction == 'OUTBOUND' ? 'ida' : 'volta'} desfeito: ${passenger.name}.');
+    _changed();
+    return const StoreResult.ok();
+  }
+
+
 
   bool _canEdit() {
     final u = _user;

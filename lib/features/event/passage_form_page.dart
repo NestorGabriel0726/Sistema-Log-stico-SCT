@@ -231,13 +231,19 @@ class _PassageFormPageState extends ConsumerState<PassageFormPage> {
     }
 
     final event = store.eventById(widget.eventId);
-    final expectedPreview = widget.isEditing && event != null
+    final expectedPreview = event != null
         ? _drafts.fold<int>(0, (sum, d) {
+            final isExempt = d.birthDate != null &&
+                DomainCalculations.isExemptByAge(
+                  birthDate: d.birthDate!,
+                  eventDate: event.startDate,
+                  minimumPayingAge: event.minimumPayingAge,
+                );
             return sum +
                 DomainCalculations.calculatePassengerDueCents(
                   selectedDaysCount: d.dayIds.length,
                   dailyFareCents: event.dailyFareCents,
-                  isExempt: d.category == PassengerCategory.exempt,
+                  isExempt: isExempt,
                 );
           })
         : null;
@@ -606,6 +612,33 @@ class _PassageFormPageState extends ConsumerState<PassageFormPage> {
                         ),
                       ],
                       const SizedBox(height: AppSpacing.sm),
+                      if (d.category == PassengerCategory.exempt) ...[
+                        Container(
+                          padding: const EdgeInsets.all(AppSpacing.sm),
+                          margin: const EdgeInsets.only(bottom: AppSpacing.xs),
+                          decoration: BoxDecoration(
+                            color: AppColors.warning.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                            border: Border.all(
+                              color: AppColors.warning.withValues(alpha: 0.4),
+                            ),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.info_outline, size: 18, color: AppColors.warning),
+                              SizedBox(width: AppSpacing.xs),
+                              Expanded(
+                                child: Text(
+                                  'Este passageiro foi cadastrado anteriormente como Isento. '
+                                  'A isenção agora é calculada automaticamente pela data de nascimento. '
+                                  'Selecione a categoria real abaixo.',
+                                  style: TextStyle(fontSize: 12, color: AppColors.warning),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       DropdownButtonFormField<PassengerCategory>(
                         value: d.category,
                         isExpanded: true,
@@ -613,9 +646,16 @@ class _PassageFormPageState extends ConsumerState<PassageFormPage> {
                           labelText: 'Categoria',
                           prefixIcon: Icon(Icons.category_outlined, size: 20),
                         ),
-                        items: PassengerCategory.values
-                            .map((c) => DropdownMenuItem(value: c, child: Text(c.label)))
-                            .toList(),
+                        items: [
+                          if (d.category == PassengerCategory.exempt)
+                            const DropdownMenuItem(
+                              value: PassengerCategory.exempt,
+                              child: Text('Isento (legado)'),
+                            ),
+                          ...PassengerCategory.values
+                              .where((c) => c != PassengerCategory.exempt)
+                              .map((c) => DropdownMenuItem(value: c, child: Text(c.label))),
+                        ],
                         onChanged: _saving
                             ? null
                             : (v) => setState(() => d.category = v ?? d.category),
@@ -652,61 +692,122 @@ class _PassageFormPageState extends ConsumerState<PassageFormPage> {
                           ),
                         ],
                       ),
-                      if (d.category == PassengerCategory.exempt ||
-                          d.category == PassengerCategory.minor) ...[
-                        const SizedBox(height: AppSpacing.sm),
-                        Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                            onTap: _saving
-                                ? null
-                                : () async {
-                                    final picked = await showDatePicker(
-                                      context: context,
-                                      initialDate: d.birthDate ?? DateTime(2018),
-                                      firstDate: DateTime(1990),
-                                      lastDate: DateTime.now(),
-                                    );
-                                    if (picked != null) setState(() => d.birthDate = picked);
-                                  },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: AppSpacing.md,
-                                vertical: AppSpacing.sm,
-                              ),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                                border: Border.all(
-                                  color: isDark ? AppColors.borderDark : AppColors.borderLight,
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.cake_outlined, color: AppColors.primary, size: 20),
-                                  const SizedBox(width: AppSpacing.sm),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        const Text('Data de Nascimento', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                                        Text(
-                                          d.birthDate == null
-                                              ? 'Obrigatório para isenção'
-                                              : AppFormatters.date(d.birthDate!),
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: d.birthDate == null ? AppColors.warning : cs.onSurfaceVariant,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const Icon(Icons.calendar_today_outlined, size: 16),
-                                ],
+                      const SizedBox(height: AppSpacing.sm),
+                      Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                          onTap: _saving
+                              ? null
+                              : () async {
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: d.birthDate ?? DateTime(2018),
+                                    firstDate: DateTime(1920),
+                                    lastDate: DateTime.now(),
+                                  );
+                                  if (picked != null) setState(() => d.birthDate = picked);
+                                },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.md,
+                              vertical: AppSpacing.sm,
+                            ),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                              border: Border.all(
+                                color: isDark ? AppColors.borderDark : AppColors.borderLight,
                               ),
                             ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.cake_outlined, color: AppColors.primary, size: 20),
+                                const SizedBox(width: AppSpacing.sm),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text('Data de Nascimento', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                                      Text(
+                                        d.birthDate == null
+                                            ? 'Toque para informar data de nascimento'
+                                            : AppFormatters.date(d.birthDate!),
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: d.birthDate == null ? cs.onSurfaceVariant : cs.onSurface,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (d.birthDate != null)
+                                  IconButton(
+                                    icon: const Icon(Icons.close, size: 16),
+                                    tooltip: 'Limpar data',
+                                    onPressed: _saving ? null : () => setState(() => d.birthDate = null),
+                                  )
+                                else
+                                  const Icon(Icons.calendar_today_outlined, size: 16),
+                              ],
+                            ),
                           ),
+                        ),
+                      ),
+                      if (event != null) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        Builder(
+                          builder: (context) {
+                            final msg = DomainCalculations.ageEligibilityMessage(
+                              birthDate: d.birthDate,
+                              eventDate: event.startDate,
+                              minimumPayingAge: event.minimumPayingAge,
+                              eventTheme: event.theme,
+                            );
+                            final isExempt = d.birthDate != null &&
+                                DomainCalculations.isExemptByAge(
+                                  birthDate: d.birthDate!,
+                                  eventDate: event.startDate,
+                                  minimumPayingAge: event.minimumPayingAge,
+                                );
+                            final bannerColor = d.birthDate == null
+                                ? cs.onSurfaceVariant
+                                : (isExempt ? AppColors.success : AppColors.primary);
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.sm,
+                                vertical: AppSpacing.xs + 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: bannerColor.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                                border: Border.all(color: bannerColor.withValues(alpha: 0.25)),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    d.birthDate == null
+                                        ? Icons.info_outline
+                                        : (isExempt ? Icons.check_circle_outline : Icons.monetization_on_outlined),
+                                    size: 16,
+                                    color: bannerColor,
+                                  ),
+                                  const SizedBox(width: AppSpacing.xs),
+                                  Expanded(
+                                    child: Text(
+                                      msg,
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        height: 1.3,
+                                        fontWeight: FontWeight.w500,
+                                        color: bannerColor,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
                         ),
                       ],
                       if (d.category == PassengerCategory.minor ||

@@ -293,6 +293,47 @@ class EventDay {
 }
 
 @immutable
+class VehicleStop {
+  final String id;
+  final String name;
+  final String? reference;
+  final int sequence;
+
+  const VehicleStop({
+    required this.id,
+    required this.name,
+    this.reference,
+    required this.sequence,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'reference': reference,
+        'sequence': sequence,
+      };
+
+  factory VehicleStop.fromJson(Map<String, dynamic> json) => VehicleStop(
+        id: json['id'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        reference: json['reference'] as String?,
+        sequence: (json['sequence'] as num?)?.toInt() ?? 1,
+      );
+
+  VehicleStop copyWith({
+    String? name,
+    String? reference,
+    int? sequence,
+  }) {
+    return VehicleStop(
+      id: id,
+      name: name ?? this.name,
+      reference: reference ?? this.reference,
+      sequence: sequence ?? this.sequence,
+    );
+  }
+}
+@immutable
 class Vehicle {
   final String id;
   final String eventId;
@@ -300,6 +341,7 @@ class Vehicle {
   final VehicleType type;
   final int physicalCapacity;
   final int localCapacity;
+  final List<VehicleStop> stops;
 
   const Vehicle({
     required this.id,
@@ -308,9 +350,28 @@ class Vehicle {
     this.type = VehicleType.bus,
     required this.physicalCapacity,
     required this.localCapacity,
+    this.stops = const [],
   });
 
   int get capacity => localCapacity;
+
+  Vehicle copyWith({
+    String? name,
+    VehicleType? type,
+    int? physicalCapacity,
+    int? localCapacity,
+    List<VehicleStop>? stops,
+  }) {
+    return Vehicle(
+      id: id,
+      eventId: eventId,
+      name: name ?? this.name,
+      type: type ?? this.type,
+      physicalCapacity: physicalCapacity ?? this.physicalCapacity,
+      localCapacity: localCapacity ?? this.localCapacity,
+      stops: stops ?? this.stops,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -319,23 +380,35 @@ class Vehicle {
         'type': type.name,
         'physicalCapacity': physicalCapacity,
         'localCapacity': localCapacity,
+        'stops': stops.map((s) => s.toJson()).toList(),
       };
 
-  factory Vehicle.fromJson(Map<String, dynamic> json) => Vehicle(
-        id: json['id'] as String? ?? '',
-        eventId: json['eventId'] as String? ?? '',
-        name: json['name'] as String? ?? '',
-        type: VehicleType.values.firstWhere(
-          (t) => t.name == json['type'],
-          orElse: () => VehicleType.bus,
-        ),
-        physicalCapacity: (json['physicalCapacity'] as num?)?.toInt() ??
-            (json['capacity'] as num?)?.toInt() ??
-            0,
-        localCapacity: (json['localCapacity'] as num?)?.toInt() ??
-            (json['capacity'] as num?)?.toInt() ??
-            0,
-      );
+  factory Vehicle.fromJson(Map<String, dynamic> json) {
+    final rawStops = json['stops'] as List?;
+    final parsedStops = rawStops
+            ?.whereType<Map<String, dynamic>>()
+            .map(VehicleStop.fromJson)
+            .toList() ??
+        <VehicleStop>[];
+    parsedStops.sort((a, b) => a.sequence.compareTo(b.sequence));
+
+    return Vehicle(
+      id: json['id'] as String? ?? '',
+      eventId: json['eventId'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      type: VehicleType.values.firstWhere(
+        (t) => t.name == json['type'],
+        orElse: () => VehicleType.bus,
+      ),
+      physicalCapacity: (json['physicalCapacity'] as num?)?.toInt() ??
+          (json['capacity'] as num?)?.toInt() ??
+          0,
+      localCapacity: (json['localCapacity'] as num?)?.toInt() ??
+          (json['capacity'] as num?)?.toInt() ??
+          0,
+      stops: parsedStops,
+    );
+  }
 }
 
 @immutable
@@ -407,6 +480,8 @@ class Passenger {
   bool get missingResponsible =>
       needsResponsible && (responsibleName == null || responsibleName!.trim().isEmpty);
   bool get hasDataPending => missingDocument || missingResponsible;
+  bool needsAgeReview(TransportEvent event) =>
+      category == PassengerCategory.exempt && birthDate == null;
 
   Passenger copyWith({
     String? name,
@@ -475,6 +550,7 @@ class Allocation {
   final String? relocatedToVehicleId;
   final String? substitutePassengerId;
   final String? replacedPassengerId;
+  final String? stopId;
 
   const Allocation({
     required this.id,
@@ -486,6 +562,7 @@ class Allocation {
     this.relocatedToVehicleId,
     this.substitutePassengerId,
     this.replacedPassengerId,
+    this.stopId,
   });
 
   bool get isActive => status == AllocationStatus.active;
@@ -497,6 +574,8 @@ class Allocation {
     String? substitutePassengerId,
     String? replacedPassengerId,
     String? vehicleId,
+    String? stopId,
+    bool clearStopId = false,
   }) {
     return Allocation(
       id: id,
@@ -508,6 +587,7 @@ class Allocation {
       relocatedToVehicleId: relocatedToVehicleId ?? this.relocatedToVehicleId,
       substitutePassengerId: substitutePassengerId ?? this.substitutePassengerId,
       replacedPassengerId: replacedPassengerId ?? this.replacedPassengerId,
+      stopId: clearStopId ? null : (stopId ?? this.stopId),
     );
   }
 
@@ -521,6 +601,7 @@ class Allocation {
         'relocatedToVehicleId': relocatedToVehicleId,
         'substitutePassengerId': substitutePassengerId,
         'replacedPassengerId': replacedPassengerId,
+        'stopId': stopId,
       };
 
   factory Allocation.fromJson(Map<String, dynamic> json) => Allocation(
@@ -536,6 +617,7 @@ class Allocation {
         relocatedToVehicleId: json['relocatedToVehicleId'] as String?,
         substitutePassengerId: json['substitutePassengerId'] as String?,
         replacedPassengerId: json['replacedPassengerId'] as String?,
+        stopId: json['stopId'] as String?,
       );
 }
 
