@@ -217,11 +217,12 @@ class LocalAppStore extends ChangeNotifier {
     _changed();
   }
 
-  List<TransportEvent> listEvents() => List.unmodifiable(_events);
+  List<TransportEvent> listEvents({bool includeDeleted = false}) =>
+      List.unmodifiable(_events.where((e) => includeDeleted || !e.isDeleted));
 
-  TransportEvent? eventById(String id) {
+  TransportEvent? eventById(String id, {bool includeDeleted = false}) {
     for (final e in _events) {
-      if (e.id == id) return e;
+      if (e.id == id && (includeDeleted || !e.isDeleted)) return e;
     }
     return null;
   }
@@ -483,6 +484,66 @@ class LocalAppStore extends ChangeNotifier {
     }
     _events[i] = updated;
     _log(updated.id, 'Configurações do evento atualizadas.');
+    _changed();
+    return const StoreResult.ok();
+  }
+
+  EventDeletionImpact describeEventDeletionImpact(String eventId) {
+    final event = eventById(eventId, includeDeleted: true);
+    final passengers = passengersForEvent(eventId);
+    final passages = passagesForEvent(eventId);
+    final vehicles = vehiclesForEvent(eventId);
+    final allocations = allocationsForEvent(eventId, activeOnly: false);
+    final checkIns = allocations
+        .map((a) => _checkIns.where((c) => c.allocationId == a.id).length)
+        .fold<int>(0, (sum, count) => sum + count);
+    final paidCents = passages.fold<int>(0, (sum, p) => sum + p.paidCents);
+
+    return EventDeletionImpact(
+      eventTheme: event?.theme ?? '',
+      passengerCount: passengers.length,
+      passageCount: passages.length,
+      vehicleCount: vehicles.length,
+      allocationCount: allocations.length,
+      checkInCount: checkIns,
+      paidCents: paidCents,
+      hasFinancialRecords: paidCents > 0,
+    );
+  }
+
+  StoreResult deleteEvent(String eventId, {bool confirmed = false}) {
+    if (_user?.role != UserRole.coordinator) {
+      return const StoreResult.error('Apenas o coordenador pode excluir eventos.');
+    }
+    final index = _events.indexWhere((e) => e.id == eventId);
+    if (index < 0) {
+      return const StoreResult.error('Evento não encontrado.');
+    }
+    final impact = describeEventDeletionImpact(eventId);
+    if (!confirmed) {
+      final reason = impact.hasFinancialRecords
+          ? 'Este evento possui ${AppFormatters.cents(impact.paidCents)} recebidos. A exclusão arquivará o evento com segurança para preservar os dados financeiros.'
+          : 'Deseja realmente excluir este evento? Todos os vínculos sem histórico financeiro serão removidos.';
+      return StoreResult.confirm(reason);
+    }
+
+    final event = _events[index];
+    if (impact.hasFinancialRecords || impact.checkInCount > 0) {
+      // Exclusão lógica (soft delete) para proteger integridade financeira e histórico
+      _events[index] = event.copyWith(deletedAt: DateTime.now());
+      _log(eventId, 'Evento "${event.theme}" arquivado (exclusão lógica).');
+    } else {
+      // Exclusão física limpa quando não há pagamentos ou histórico crítico
+      _events.removeAt(index);
+      _days.removeWhere((d) => d.eventId == eventId);
+      final pIds = _passengers.where((p) => p.eventId == eventId).map((p) => p.id).toSet();
+      _passengers.removeWhere((p) => p.eventId == eventId);
+      _passages.removeWhere((p) => p.eventId == eventId);
+      final vIds = _vehicles.where((v) => v.eventId == eventId).map((v) => v.id).toSet();
+      _vehicles.removeWhere((v) => v.eventId == eventId);
+      _allocations.removeWhere((a) => pIds.contains(a.passengerId) || vIds.contains(a.vehicleId));
+      _log(eventId, 'Evento "${event.theme}" e dependências excluídos.');
+    }
     _changed();
     return const StoreResult.ok();
   }
@@ -1157,6 +1218,11 @@ class LocalAppStore extends ChangeNotifier {
     if (event == null || eventUser == null || !eventUser.canCheckIn(event)) {
       return const StoreResult.error('Você não tem permissão de check-in neste evento.');
     }
+    if ((eventUser.role == UserRole.captain || eventUser.role == UserRole.captainHelper) &&
+        eventUser.assignedVehicleId != null &&
+        allocation.vehicleId != eventUser.assignedVehicleId) {
+      return const StoreResult.error('Você só pode realizar check-in no seu veículo designado.');
+    }
     if (hasCheckIn(allocationId, direction)) {
       return const StoreResult.error('Check-in já registrado.');
     }
@@ -1182,6 +1248,11 @@ class LocalAppStore extends ChangeNotifier {
     final event = eventById(passenger.eventId);
     if (event == null || eventUser == null || !eventUser.canCheckIn(event)) {
       return const StoreResult.error('Você não tem permissão para reverter check-in neste evento.');
+    }
+    if ((eventUser.role == UserRole.captain || eventUser.role == UserRole.captainHelper) &&
+        eventUser.assignedVehicleId != null &&
+        allocation.vehicleId != eventUser.assignedVehicleId) {
+      return const StoreResult.error('Você só pode reverter check-in no seu veículo designado.');
     }
     final index = _checkIns.indexWhere(
       (c) => c.allocationId == allocationId && c.direction == direction,

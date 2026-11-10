@@ -165,6 +165,9 @@ class EventsPage extends ConsumerWidget {
                                                 EventFormPage(existing: event)),
                                       )
                                   : null,
+                              onDelete: user.canManageEvent
+                                  ? () => _confirmDeleteEvent(context, ref, event)
+                                  : null,
                             );
                           },
                         ),
@@ -187,11 +190,84 @@ class EventsPage extends ConsumerWidget {
           : null,
     );
   }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _EventRow — linha de evento na listagem
-// ─────────────────────────────────────────────────────────────────────────────
+  Future<void> _confirmDeleteEvent(
+    BuildContext context,
+    WidgetRef ref,
+    TransportEvent event,
+  ) async {
+    final store = ref.read(localStoreProvider);
+    final impact = store.describeEventDeletionImpact(event.id);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: AppColors.danger),
+            SizedBox(width: AppSpacing.sm),
+            Text('Excluir evento'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Tem certeza que deseja excluir "${event.theme}"?'),
+            const SizedBox(height: AppSpacing.md),
+            const Text('Impacto da exclusão:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: AppSpacing.xs),
+            Text('• ${impact.passengerCount} passageiro(s) vinculado(s)'),
+            Text('• ${impact.vehicleCount} veículo(s) cadastrado(s)'),
+            Text('• ${impact.passageCount} passagem(ns) registrada(s)'),
+            if (impact.hasFinancialRecords) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                decoration: BoxDecoration(
+                  color: AppColors.warningBg,
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                  border: Border.all(color: AppColors.warning),
+                ),
+                child: Text(
+                  'Este evento possui ${AppFormatters.cents(impact.paidCents)} recebidos. Para proteger a integridade financeira, o evento será arquivado (exclusão lógica).',
+                  style: const TextStyle(fontSize: 12, color: AppColors.warning),
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      final res = store.deleteEvent(event.id, confirmed: true);
+      await store.flushPersist();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res.ok
+                ? (impact.hasFinancialRecords
+                    ? 'Evento arquivado com segurança.'
+                    : 'Evento excluído.')
+                : res.message),
+          ),
+        );
+      }
+    }
+  }
+}
 
 class _EventRow extends StatelessWidget {
   final TransportEvent event;
@@ -200,6 +276,7 @@ class _EventRow extends StatelessWidget {
   final int passages;
   final VoidCallback onTap;
   final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   const _EventRow({
     required this.event,
@@ -208,6 +285,7 @@ class _EventRow extends StatelessWidget {
     required this.passages,
     required this.onTap,
     this.onEdit,
+    this.onDelete,
   });
 
   @override
@@ -266,6 +344,18 @@ class _EventRow extends StatelessWidget {
                             constraints:
                                 const BoxConstraints(minWidth: 32, minHeight: 32),
                             color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      if (onDelete != null)
+                        Tooltip(
+                          message: 'Excluir evento',
+                          child: IconButton(
+                            onPressed: onDelete,
+                            icon: const Icon(Icons.delete_outline, size: 18),
+                            padding: const EdgeInsets.all(6),
+                            constraints:
+                                const BoxConstraints(minWidth: 32, minHeight: 32),
+                            color: AppColors.danger,
                           ),
                         ),
                       Tooltip(

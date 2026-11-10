@@ -158,6 +158,7 @@ class TransportEvent {
   final DateTime? finalListDeadline;
   final bool captainCheckinEnabled;
   final bool helperCheckinEnabled;
+  final DateTime? deletedAt;
 
   const TransportEvent({
     required this.id,
@@ -173,9 +174,12 @@ class TransportEvent {
     this.finalListDeadline,
     this.captainCheckinEnabled = true,
     this.helperCheckinEnabled = false,
+    this.deletedAt,
   });
 
   int get dayCount => endDate.difference(startDate).inDays + 1;
+
+  bool get isDeleted => deletedAt != null;
 
   bool get passageDeadlinePassed =>
       passageDeadline != null && DateTime.now().isAfter(passageDeadline!);
@@ -193,9 +197,11 @@ class TransportEvent {
     DateTime? finalListDeadline,
     bool? captainCheckinEnabled,
     bool? helperCheckinEnabled,
+    DateTime? deletedAt,
     bool clearPassageDeadline = false,
     bool clearPreliminary = false,
     bool clearFinal = false,
+    bool clearDeletedAt = false,
   }) {
     return TransportEvent(
       id: id,
@@ -215,6 +221,7 @@ class TransportEvent {
           clearFinal ? null : (finalListDeadline ?? this.finalListDeadline),
       captainCheckinEnabled: captainCheckinEnabled ?? this.captainCheckinEnabled,
       helperCheckinEnabled: helperCheckinEnabled ?? this.helperCheckinEnabled,
+      deletedAt: clearDeletedAt ? null : (deletedAt ?? this.deletedAt),
     );
   }
 
@@ -232,6 +239,7 @@ class TransportEvent {
         'finalListDeadline': finalListDeadline?.toIso8601String(),
         'captainCheckinEnabled': captainCheckinEnabled,
         'helperCheckinEnabled': helperCheckinEnabled,
+        'deletedAt': deletedAt?.toIso8601String(),
       };
 
   factory TransportEvent.fromJson(Map<String, dynamic> json) => TransportEvent(
@@ -260,6 +268,9 @@ class TransportEvent {
             : null,
         captainCheckinEnabled: json['captainCheckinEnabled'] as bool? ?? true,
         helperCheckinEnabled: json['helperCheckinEnabled'] as bool? ?? false,
+        deletedAt: json['deletedAt'] != null
+            ? DateTime.tryParse(json['deletedAt'] as String)
+            : null,
       );
 }
 
@@ -841,4 +852,27 @@ class StoreResult {
   const StoreResult.confirm(this.message)
       : ok = false,
         needsConfirm = true;
+}
+
+@immutable
+class EventDeletionImpact {
+  final String eventTheme;
+  final int passengerCount;
+  final int passageCount;
+  final int vehicleCount;
+  final int allocationCount;
+  final int checkInCount;
+  final int paidCents;
+  final bool hasFinancialRecords;
+
+  const EventDeletionImpact({
+    required this.eventTheme,
+    required this.passengerCount,
+    required this.passageCount,
+    required this.vehicleCount,
+    required this.allocationCount,
+    required this.checkInCount,
+    required this.paidCents,
+    required this.hasFinancialRecords,
+  });
 }
