@@ -876,3 +876,27 @@ class EventDeletionImpact {
     required this.hasFinancialRecords,
   });
 }
+
+@immutable
+class PassengerDraft {
+  /// ID do passageiro existente (modo edição). Null = novo passageiro.
+  final String? id;
+  final String name;
+  final String? documentType;
+  final String? documentNumber;
+  final DateTime? birthDate;
+  final PassengerCategory category;
+  final String? responsibleName;
+  final List<String> dayIds;
+
+  const PassengerDraft({
+    this.id,
+    required this.name,
+    this.documentType,
+    this.documentNumber,
+    this.birthDate,
+    this.category = PassengerCategory.adult,
+    this.responsibleName,
+    required this.dayIds,
+  });
+}

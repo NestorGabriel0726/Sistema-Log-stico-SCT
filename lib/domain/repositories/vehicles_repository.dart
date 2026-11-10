@@ -1,24 +1,23 @@
 import '../models.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Abstract repository for vehicle data.
 abstract class VehiclesRepository {
-  /// Returns the list of vehicles for a given event.
   Future<List<Vehicle>> listVehicles(String eventId);
 
-  /// Retrieves a vehicle by its id.
   Future<Vehicle?> getVehicle(String id);
 
-  /// Persists a new vehicle.
-  Future<void> addVehicle(Vehicle vehicle);
+  Future<StoreResult> addVehicle({
+    required String eventId,
+    required String name,
+    required VehicleType type,
+    required int physicalCapacity,
+    required int localCapacity,
+    List<VehicleStop> stops = const [],
+  });
 
-  /// Updates an existing vehicle.
-  Future<void> updateVehicle(Vehicle vehicle);
+  Future<StoreResult> updateVehicle(
+    Vehicle vehicle, {
+    Map<String, String>? reassignStops,
+  });
 
-  /// Deletes a vehicle.
-  Future<void> deleteVehicle(String id);
-
-  /// Stream of vehicle lists for an event.
   Stream<List<Vehicle>> watchVehicles(String eventId);
 }
-

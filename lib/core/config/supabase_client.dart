@@ -1,10 +1,20 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Provides a globally accessible Supabase client instance.
-/// The client is initialized in `main.dart` when the environment variables
-/// `SUPABASE_URL` and `SUPABASE_ANON_KEY` are provided. If they are not set,
-/// `Supabase.instance.client` will still be available but will throw if used.
-/// Consumers should guard calls with `backendModeProvider` or by checking
-/// `Supabase.instance.client.session`.
-final supabaseClient = Supabase.instance.client;
+import 'app_config.dart';
 
+/// Returns the SDK client only after a successful initialize. Never call
+/// `Supabase.instance.client` at import time — that throws when the app
+/// runs in local demo mode without credentials.
+SupabaseClient? tryGetSupabaseClient() {
+  if (!AppConfig.supabaseInitialized) return null;
+  try {
+    return Supabase.instance.client;
+  } catch (_) {
+    return null;
+  }
+}
+
+final supabaseClientProvider = Provider<SupabaseClient?>((ref) {
+  return tryGetSupabaseClient();
+});

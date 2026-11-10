@@ -1,11 +1,11 @@
-// Backend mode enumeration and provider
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'app_config.dart';
 
 enum BackendMode { local, supabase }
 
-// Riverpod provider to select active backend (default: local).
-// The app can override this provider at runtime to switch implementations.
-
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-final backendModeProvider = Provider<BackendMode>((ref) => BackendMode.local);
-
+/// Active backend. Always `local` unless Supabase was initialized with
+/// non-empty credentials and `SCT_BACKEND=supabase`.
+final backendModeProvider = Provider<BackendMode>((ref) {
+  return AppConfig.canUseSupabase ? BackendMode.supabase : BackendMode.local;
+});

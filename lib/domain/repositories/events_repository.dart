@@ -1,24 +1,29 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models.dart';
 
-/// Abstract repository for transport events.
 abstract class EventsRepository {
-  /// Returns a list of events. If [includeDeleted] is true, also returns events marked as deleted.
   Future<List<TransportEvent>> listEvents({bool includeDeleted = false});
 
-  /// Retrieves a single event by its [id]. Returns null if not found.
   Future<TransportEvent?> getEvent(String id, {bool includeDeleted = false});
 
-  /// Persists a new [event].
-  Future<void> addEvent(TransportEvent event);
+  Future<List<EventDay>> daysForEvent(String eventId);
 
-  /// Updates an existing [event].
-  Future<void> updateEvent(TransportEvent event);
+  Future<StoreResult> createEvent({
+    required String theme,
+    required EventKind kind,
+    required DateTime start,
+    required DateTime end,
+    required int dailyFareCents,
+    int minimumPayingAge = 6,
+    DateTime? passageDeadline,
+    DateTime? preliminaryListDeadline,
+    DateTime? finalListDeadline,
+  });
 
-  /// Marks an event as deleted (soft‑delete).
-  Future<void> deleteEvent(String id);
+  Future<StoreResult> updateEvent(TransportEvent event);
 
-  /// Stream of events that updates when the underlying store changes.
+  Future<EventDeletionImpact> describeDeletionImpact(String eventId);
+
+  Future<StoreResult> deleteEvent(String id, {bool confirmed = false});
+
   Stream<List<TransportEvent>> watchEvents({bool includeDeleted = false});
 }
-
